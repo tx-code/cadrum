@@ -184,6 +184,36 @@ fn test_operator_overloads() {
 	}
 }
 
+#[test]
+fn test_sum_olympic_rings_out_of_order() {
+	// 5 つのソリッドが「隣り合うもの同士のみ重なる」鎖状配置: 1-2-3-4-5
+	// 順 1,3,5,2,4 で sum() すると、1+3 の時点では disjoint (2個) になるが
+	// 最後の 4 を足したときに全体が連結して 1 個になる。
+	// try_fold + (&acc + s) だと中間 OneFailed(2) で失敗するが、
+	// Vec<Solid> を中間に保つ実装なら正しく Ok(Solid) で返る。
+	let s = 1.0; // cube サイズ
+	let step = 0.8; // ステップ (重なるよう s より小さく)
+	let ring1 = Solid::cube(s, s, s).translate(DVec3::new(0.0 * step, 0.0, 0.0));
+	let ring2 = Solid::cube(s, s, s).translate(DVec3::new(1.0 * step, 0.0, 0.0));
+	let ring3 = Solid::cube(s, s, s).translate(DVec3::new(2.0 * step, 0.0, 0.0));
+	let ring4 = Solid::cube(s, s, s).translate(DVec3::new(3.0 * step, 0.0, 0.0));
+	let ring5 = Solid::cube(s, s, s).translate(DVec3::new(4.0 * step, 0.0, 0.0));
+
+	// out-of-order: 1, 3, 5, 2, 4
+	let out_of_order = [&ring1, &ring3, &ring5, &ring2, &ring4];
+	let unioned: Solid = out_of_order.iter().copied().sum::<Result<Solid, _>>()
+		.expect("out-of-order union should succeed at the end");
+	println!("out-of-order sum: volume = {:.4}", unioned.volume());
+
+	// 順番通りでも当然成功
+	let in_order = [&ring1, &ring2, &ring3, &ring4, &ring5];
+	let unioned_ordered: Solid = in_order.iter().copied().sum::<Result<Solid, _>>().unwrap();
+
+	// 両方とも同じ最終ボリュームになるはず
+	assert!((unioned.volume() - unioned_ordered.volume()).abs() < 1e-6,
+		"order-independent: {} vs {}", unioned.volume(), unioned_ordered.volume());
+}
+
 /// solid を out/ 以下に SVG, STL, STEP で書き出す。
 fn write_outputs(solids: &[Solid], name: &str) {
 	std::fs::create_dir_all("out").unwrap();

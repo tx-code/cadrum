@@ -734,8 +734,13 @@ impl std::ops::Mul for &Solid {
 }
 
 // `iter.sum::<Result<Solid, Error>>()` / `iter.product::<Result<Solid, Error>>()` で
-// `&Solid` イテレータを `+` / `*` で畳む。空イテレータは `Err(OneFailed(0))`。
-// 途中の演算失敗 (boolean_op が None / 結果が単一 Solid でない) もそのまま伝播する。
+// `&Solid` イテレータを union / intersect で畳む。空イテレータは `Err(OneFailed(0))`。
+//
+// **中間結果は `Vec<Solid>` のまま保持**し、終端でのみ「単一 Solid か」をチェックする。
+// `&acc + s` を `try_fold` で連鎖させると中間が複数 Solid になった瞬間 OneFailed で
+// 打ち切られ、オリンピックの輪のような「最終的には 1 連結体だが演算順序によっては
+// 途中で複数ピースになる」ケースを誤って失敗扱いにしてしまう。例: 5 つの輪を
+// 1→3→5→2→4 の順で fold すると 1+3 の時点で disjoint だが、最後の 4 で全体が連結する。
 //
 // 戻り型を `Solid` ではなく `Result<Solid, Error>` にしているのは、`Sum::sum` が
 // `-> Self` で panic か Result しか選択肢がなく、CAD 文脈で panic は避けたいため。
@@ -747,13 +752,21 @@ impl std::ops::Mul for &Solid {
 impl<'a> std::iter::Sum<&'a Solid> for Result<Solid, Error> {
 	fn sum<I: Iterator<Item = &'a Solid>>(mut iter: I) -> Self {
 		let first = iter.next().ok_or(Error::OneFailed(0))?;
-		iter.try_fold(first.clone(), |acc, s| &acc + s)
+		let mut acc: Vec<Solid> = vec![first.clone()];
+		for s in iter {
+			acc = Solid::boolean_union(&acc, [s])?;
+		}
+		exactly_one(acc)
 	}
 }
 
 impl<'a> std::iter::Product<&'a Solid> for Result<Solid, Error> {
 	fn product<I: Iterator<Item = &'a Solid>>(mut iter: I) -> Self {
 		let first = iter.next().ok_or(Error::OneFailed(0))?;
-		iter.try_fold(first.clone(), |acc, s| &acc * s)
+		let mut acc: Vec<Solid> = vec![first.clone()];
+		for s in iter {
+			acc = Solid::boolean_intersect(&acc, [s])?;
+		}
+		exactly_one(acc)
 	}
 }
