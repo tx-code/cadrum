@@ -609,20 +609,6 @@ impl Compound for Solid {
 		Self::new(self.inner, std::collections::HashMap::new(), self.history)
 	}
 
-	// ==================== Boolean ====================
-
-	fn union<'a>(&self, tool: impl IntoIterator<Item = &'a Solid>) -> Result<Vec<Solid>, Error> {
-		<Solid as SolidStruct>::boolean_union([self], tool)
-	}
-
-	fn subtract<'a>(&self, tool: impl IntoIterator<Item = &'a Solid>) -> Result<Vec<Solid>, Error> {
-		<Solid as SolidStruct>::boolean_subtract([self], tool)
-	}
-
-	fn intersect<'a>(&self, tool: impl IntoIterator<Item = &'a Solid>) -> Result<Vec<Solid>, Error> {
-		<Solid as SolidStruct>::boolean_intersect([self], tool)
-	}
-	
 	fn iter_elem(&self) -> impl Iterator<Item = &Self::Elem> + '_ {
 		panic!("Cannot iter_elem on Solid, because Solid is not Compound");
 		#[allow(unreachable_code)] std::iter::empty()

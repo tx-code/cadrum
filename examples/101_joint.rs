@@ -11,9 +11,9 @@ fn main() -> Result<(), Error> {
 	let (inner, outer, height) = (8.1, 20., 60.0);
 	let base = part(inner, outer, height)?;
 	let parts = [base.clone(), base.clone().rotate(DVec3::ZERO, DVec3::ONE, std::f64::consts::TAU / 3.0), base.clone().rotate(DVec3::ZERO, DVec3::ONE, std::f64::consts::TAU * 2.0 / 3.0)];
-	let positive = parts.iter().map(|p| Ok::<_, Error>(vec![p[0].clone(), p[1].clone()])).reduce(|a, b| a?.union(&b?)).unwrap()?;
-	let negative = parts.iter().map(|p| Ok::<_, Error>(vec![p[2].clone()])).reduce(|a, b| a?.union(&b?)).unwrap()?;
-	let result = positive.subtract(&negative)?;
+	let positive = parts.iter().map(|p| Ok::<_, Error>(vec![p[0].clone(), p[1].clone()])).reduce(|a, b| Solid::boolean_union(&a?, &b?)).unwrap()?;
+	let negative = parts.iter().map(|p| Ok::<_, Error>(vec![p[2].clone()])).reduce(|a, b| Solid::boolean_union(&a?, &b?)).unwrap()?;
+	let result = Solid::boolean_subtract(&positive, &negative)?;
 	let mut w = std::fs::File::create("joints.step").unwrap();
 	Solid::write_step(&result, &mut w).unwrap();
 	let mut w = std::fs::File::create("joints.stl").unwrap();

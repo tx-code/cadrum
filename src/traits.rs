@@ -655,9 +655,12 @@ pub trait SolidStruct: Sized + Clone + Compound {
 	/// cross-section direction (always closed).
 	fn bspline(u: usize, v: usize, u_periodic: bool, point: impl Fn(usize, usize) -> DVec3) -> Result<Self, Error>;
 
-	// --- Boolean primitives (consumed by Compound::union/subtract/intersect wrappers) ---
+	// --- Boolean primitives (FFI への唯一の通路) ---
 	// Per-result-Solid face derivation history is attached to each Solid via
 	// `Solid::iter_history()`; no separate metadata channel.
+	// NOTE: multi-args / multi-tools セマンティクスは OCCT 仕様上「グループ内自己交差は
+	// 未定義」となるため将来的に単体×単体ラッパー (`Solid::union/subtract/intersect`)
+	// を公開し本関数群はそれらの内部実装として残る予定。
 	fn boolean_union<'a, 'b>(a: impl IntoIterator<Item = &'a Self>, b: impl IntoIterator<Item = &'b Self>) -> Result<Vec<Self>, Error> where Self: 'a + 'b;
 	fn boolean_subtract<'a, 'b>(a: impl IntoIterator<Item = &'a Self>, b: impl IntoIterator<Item = &'b Self>) -> Result<Vec<Self>, Error> where Self: 'a + 'b;
 	fn boolean_intersect<'a, 'b>(a: impl IntoIterator<Item = &'a Self>, b: impl IntoIterator<Item = &'b Self>) -> Result<Vec<Self>, Error> where Self: 'a + 'b;
@@ -682,8 +685,14 @@ pub trait SolidStruct: Sized + Clone + Compound {
 ///
 /// **コレクション最小契約**: 実装者は要素列挙 (`iter_elem`) と要素全置換 (`map_elem`)
 /// の 2 つだけを提供する。volume / area / bounding_box / center / inertia / contains /
-/// color / color_clear / union / subtract / intersect は default で提供され、
-/// 内部で `<Self::Elem as SolidStruct>::xxx(s)` を `iter_elem` 結果に対して集約する。
+/// color / color_clear は default で提供され、内部で `<Self::Elem as SolidStruct>::xxx(s)`
+/// を `iter_elem` 結果に対して集約する。
+///
+/// **boolean 演算は意図的に非対応**: `union/subtract/intersect` は `SolidStruct::boolean_*`
+/// (FFI 直通) のみが正路。OCCT の multi-args/multi-tools セマンティクスは
+/// 「グループ間の交差のみ処理し、グループ内自己交差は未定義/破綻」する設計のため、
+/// `Compound` レベルで集合論的な期待を持たせる API は罠を増やすだけ。
+/// 詳細は `notes/20260514-boolean演算は単体x単体のみ公開する方針.md`。
 ///
 /// **fallible op の意図的な不在**: `clean` は `SolidStruct` のみに置き、`Compound` には
 /// 載せない。fallible メソッドを default 化すると `try_map_elem` 相当の追加要求が必要
@@ -750,18 +759,7 @@ pub trait Compound: Transform {
 		self.map_elem(|s| <Self::Elem as Compound>::color_clear(s))
 	}
 
-	// --- Boolean (default — feed iter_elem to SolidStruct::boolean_*) ---
-	// Each result Solid carries its face-derivation history; access via
-	// `Solid::iter_history()`.
-	fn union<'a>(&self, tool: impl IntoIterator<Item = &'a Self::Elem>) -> Result<Vec<Self::Elem>, Error> where Self::Elem: 'a {
-		Self::Elem::boolean_union(self.iter_elem(), tool)
-	}
-	fn subtract<'a>(&self, tool: impl IntoIterator<Item = &'a Self::Elem>) -> Result<Vec<Self::Elem>, Error> where Self::Elem: 'a {
-		Self::Elem::boolean_subtract(self.iter_elem(), tool)
-	}
-	fn intersect<'a>(&self, tool: impl IntoIterator<Item = &'a Self::Elem>) -> Result<Vec<Self::Elem>, Error> where Self::Elem: 'a {
-		Self::Elem::boolean_intersect(self.iter_elem(), tool)
-	}
+	// Boolean は意図的に非搭載。SolidStruct::boolean_union/subtract/intersect を直接使う。
 	////////// codegen.rs
 	fn translate(self, translation: DVec3) -> Self { <Self as Transform>::translate(self, translation) }
 	fn rotate(self, axis_origin: DVec3, axis_direction: DVec3, angle: f64) -> Self { <Self as Transform>::rotate(self, axis_origin, axis_direction, angle) }

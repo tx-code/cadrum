@@ -12,17 +12,14 @@ fn main() -> Result<(), cadrum::Error> {
         .color("#e67e22");
 
     // union: merge both shapes into one — offset X=0
-    let union = make_box
-        .union(&[make_cyl.clone()])?;
+    let union = Solid::boolean_union([&make_box], [&make_cyl])?;
 
     // subtract: box minus cylinder — offset X=40
-    let subtract = make_box
-        .subtract(&[make_cyl.clone()])?
+    let subtract = Solid::boolean_subtract([&make_box], [&make_cyl])?
         .translate(DVec3::X * 40.0);
 
     // intersect: only the overlapping volume — offset X=80
-    let intersect = make_box
-        .intersect(&[make_cyl])?
+    let intersect = Solid::boolean_intersect([&make_box], [&make_cyl])?
         .translate(DVec3::X * 80.0);
 
     let shapes: Vec<Solid> = [union, subtract, intersect].concat();

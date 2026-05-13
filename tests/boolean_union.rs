@@ -1,4 +1,4 @@
-use cadrum::{Compound, Solid};
+use cadrum::Solid;
 use glam::DVec3;
 
 #[test]
@@ -10,15 +10,15 @@ fn test_union_cylinders() {
 	let c = Solid::cylinder(1.1, DVec3::Z, 1.0).translate(DVec3::new(0.0, 1.0, 0.0));
 	let d = Solid::cylinder(1.1, DVec3::Z, 1.0).translate(DVec3::new(0.0, -1.0, 0.0));
 
-	let union_a_b = [a.clone()].union(&[b.clone()]).unwrap();
+	let union_a_b = Solid::boolean_union([&a], [&b]).unwrap();
 	println!("union([A], [B]) solid count: {}", union_a_b.len());
 
-	let union_ab_cd = [a.clone(), b.clone()].union(&[c.clone(), d.clone()]).unwrap();
+	let union_ab_cd = Solid::boolean_union([&a, &b], [&c, &d]).unwrap();
 
 	println!("union([A, B], [C, D]) solid count: {}", union_ab_cd.len());
 
 	let all = [a, b, c, d];
-	let union_all_all = all.union(&all).unwrap();
+	let union_all_all = Solid::boolean_union(&all, &all).unwrap();
 	println!("union([ABCD], [ABCD]) solid count: {}", union_all_all.len());
 
 	// Output:
@@ -37,7 +37,7 @@ fn test_union_shifted() {
 	let c = Solid::cylinder(1.1, DVec3::Z, 1.0).translate(DVec3::new(0.0, 1.0, 0.0));
 	let d = Solid::cylinder(1.1, DVec3::Z, 1.0).translate(DVec3::new(2.0, 1.0, 0.0));
 
-	let union_ab_cd = [a.clone(), b.clone()].union(&[c.clone(), d.clone()]).unwrap();
+	let union_ab_cd = Solid::boolean_union([&a, &b], [&c, &d]).unwrap();
 	println!("union([A(0,0), B(2,0)], [C(0,1), D(2,1)]) solid count: {}", union_ab_cd.len());
 
 	// 完全にグループ内が自己交差しない座標 (AとBの距離=4.0 > 2.2)
@@ -46,7 +46,7 @@ fn test_union_shifted() {
 	let c_sep = Solid::cylinder(1.1, DVec3::Z, 1.0).translate(DVec3::new(0.0, 1.0, 0.0));
 	let d_sep = Solid::cylinder(1.1, DVec3::Z, 1.0).translate(DVec3::new(4.0, 1.0, 0.0));
 
-	let union_sep = [a_sep.clone(), b_sep.clone()].union(&[c_sep.clone(), d_sep.clone()]).unwrap();
+	let union_sep = Solid::boolean_union([&a_sep, &b_sep], [&c_sep, &d_sep]).unwrap();
 	println!("union([A(0,0), B(4.0,0)], [C(0,1), D(4.0,1)]) solid count: {}", union_sep.len());
 
 	// 結論をプリントする
@@ -71,7 +71,7 @@ fn test_subtract_sphere_with_multiple_holes() {
 	let hole_y = Solid::cylinder(r, DVec3::Y, len).translate(DVec3::new(0.0, -half, 0.0));
 	let hole_z = Solid::cylinder(r, DVec3::Z, len).translate(DVec3::new(0.0, 0.0, -half));
 
-	let multi = [sphere.clone()].subtract(&[hole_x.clone(), hole_y.clone(), hole_z.clone()]).unwrap();
+	let multi = Solid::boolean_subtract([&sphere], [&hole_x, &hole_y, &hole_z]).unwrap();
 	let multi_vol: f64 = multi.iter().map(|s| s.volume()).sum();
 	println!("subtract sphere - [X,Y,Z holes] (multi-tools): count={}, volume={:.4}", multi.len(), multi_vol);
 	write_outputs(&multi, "subtract_sphere_multi");
@@ -79,7 +79,7 @@ fn test_subtract_sphere_with_multiple_holes() {
 	// 逐次: 1個ずつ引く
 	let mut current = vec![sphere.clone()];
 	for tool in [&hole_x, &hole_y, &hole_z] {
-		current = current.iter().flat_map(|o| [o.clone()].subtract(&[tool.clone()]).unwrap()).collect();
+		current = current.iter().flat_map(|o| Solid::boolean_subtract([o], [tool]).unwrap()).collect();
 	}
 	let seq_vol: f64 = current.iter().map(|s| s.volume()).sum();
 	println!("subtract sphere - X then Y then Z (sequential):    count={}, volume={:.4}", current.len(), seq_vol);
@@ -110,19 +110,19 @@ fn test_intersect_sphere_with_multiple_cylinders() {
 	let cyl_y = Solid::cylinder(r, DVec3::Y, len).translate(DVec3::new(0.0, -half, 0.0));
 	let cyl_z = Solid::cylinder(r, DVec3::Z, len).translate(DVec3::new(0.0, 0.0, -half));
 
-	let multi = [sphere.clone()].intersect(&[cyl_x.clone(), cyl_y.clone(), cyl_z.clone()]).unwrap();
+	let multi = Solid::boolean_intersect([&sphere], [&cyl_x, &cyl_y, &cyl_z]).unwrap();
 	let multi_vol: f64 = multi.iter().map(|s| s.volume()).sum();
 	println!("intersect sphere ∩ [cyl_x, cyl_y, cyl_z]: count={}, volume={:.4}", multi.len(), multi_vol);
 	write_outputs(&multi, "intersect_sphere_multi");
 
-	let v_x: f64 = [sphere.clone()].intersect(&[cyl_x.clone()]).unwrap().iter().map(|s| s.volume()).sum();
-	let v_y: f64 = [sphere.clone()].intersect(&[cyl_y.clone()]).unwrap().iter().map(|s| s.volume()).sum();
-	let v_z: f64 = [sphere.clone()].intersect(&[cyl_z.clone()]).unwrap().iter().map(|s| s.volume()).sum();
+	let v_x: f64 = Solid::boolean_intersect([&sphere], [&cyl_x]).unwrap().iter().map(|s| s.volume()).sum();
+	let v_y: f64 = Solid::boolean_intersect([&sphere], [&cyl_y]).unwrap().iter().map(|s| s.volume()).sum();
+	let v_z: f64 = Solid::boolean_intersect([&sphere], [&cyl_z]).unwrap().iter().map(|s| s.volume()).sum();
 
 	// 逐次 intersect: obj ∩ X ∩ Y ∩ Z
 	let mut current = vec![sphere.clone()];
 	for tool in [&cyl_x, &cyl_y, &cyl_z] {
-		current = current.iter().flat_map(|o| [o.clone()].intersect(&[tool.clone()]).unwrap()).collect();
+		current = current.iter().flat_map(|o| Solid::boolean_intersect([o], [tool]).unwrap()).collect();
 	}
 	let seq_vol: f64 = current.iter().map(|s| s.volume()).sum();
 

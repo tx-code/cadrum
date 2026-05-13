@@ -69,7 +69,7 @@ exposes through `Solid::mesh` when an STL export or SVG render is required.
 | **Curves** | `Edge::line`, `Edge::arc_3pts`, `Edge::circle`, `Edge::polygon`, `Edge::helix`, `Edge::bspline` |
 | **Surfacing** | `Solid::extrude`, `Solid::sweep`, `Solid::loft`, `Solid::bspline` |
 | **Editing** | `Solid::shell`, `Solid::fillet_edges`, `Solid::chamfer_edges`, `Solid::clean` |
-| **Booleans** | `Solid::union`, `Solid::subtract`, `Solid::intersect` |
+| **Booleans** | `Solid::boolean_union`, `Solid::boolean_subtract`, `Solid::boolean_intersect` |
 | **Transforms** *(shared by `Solid` / `Edge` / `Compound` / `Wire`)* | `translate`, `rotate`, `rotate_x` / `_y` / `_z`, `scale`, `mirror`, `align_x` / `_y` / `_z` |
 | **Queries** | `Solid::volume`, `Solid::area`, `Solid::center`, `Solid::inertia`, `Solid::bounding_box`, `Solid::contains` |
 | **Topology** | `Solid::iter_face`, `Solid::iter_edge`, `Face::iter_edge`, `Face::project`, `Edge::project` |
@@ -314,17 +314,14 @@ fn main() -> Result<(), cadrum::Error> {
         .color("#e67e22");
 
     // union: merge both shapes into one — offset X=0
-    let union = make_box
-        .union(&[make_cyl.clone()])?;
+    let union = Solid::boolean_union([&make_box], [&make_cyl])?;
 
     // subtract: box minus cylinder — offset X=40
-    let subtract = make_box
-        .subtract(&[make_cyl.clone()])?
+    let subtract = Solid::boolean_subtract([&make_box], [&make_cyl])?
         .translate(DVec3::X * 40.0);
 
     // intersect: only the overlapping volume — offset X=80
-    let intersect = make_box
-        .intersect(&[make_cyl])?
+    let intersect = Solid::boolean_intersect([&make_box], [&make_cyl])?
         .translate(DVec3::X * 80.0);
 
     let shapes: Vec<Solid> = [union, subtract, intersect].concat();
@@ -573,11 +570,12 @@ fn build_m2_screw() -> Result<Vec<Solid>, Error> {
 	//   intersect(crest) trims the top H/8 → P/8-wide flat at the crest
 	let shaft = Solid::cylinder(r - r_delta * 6.0 / 8.0, DVec3::Z, h_thread);
 	let crest = Solid::cylinder(r - r_delta / 8.0, DVec3::Z, h_thread);
-	let thread_shaft = thread.union([&shaft])?.intersect([&crest])?;
+	let thread_shaft = Solid::boolean_union([&thread], [&shaft])?;
+	let thread_shaft = Solid::boolean_intersect(&thread_shaft, [&crest])?;
 
 	// Stack the flat head on top. Screw ends up centered on the origin.
 	let head = Solid::cylinder(r_head, DVec3::Z, h_head).translate(DVec3::Z * h_thread);
-	Ok(thread_shaft.union([&head])?.color("red"))
+	Ok(Solid::boolean_union(&thread_shaft, [&head])?.color("red"))
 }
 
 // ==================== Component 2: U-shaped pipe ====================
@@ -700,7 +698,7 @@ fn halved_shelled_torus(thickness: f64) -> Result<Solid, Error> {
 	// want to use as shell openings.
 	let cutter_face_ids: std::collections::HashSet<u64> =
 		cutter.iter_face().map(|f| f.id()).collect();
-	let halves = torus.intersect(&[cutter])?;
+	let halves = Solid::boolean_intersect([&torus], [&cutter])?;
 	let half = halves.into_iter().next().ok_or(Error::BooleanOperationFailed)?;
 	let from_cutter: std::collections::HashSet<u64> = half
 		.iter_history()
@@ -1071,7 +1069,7 @@ let block = Solid::cube(20.0, 20.0, 20.0);
 let hole  = Solid::cylinder(8.0, DVec3::Z, 30.0)
     .translate(DVec3::new(10.0, 10.0, -5.0));
 
-let drilled = block.subtract(&[hole])?;
+let drilled = Solid::boolean_subtract([&block], [&hole])?;
 let from_block: Vec<u64> = drilled[0]
     .iter_history()
     .filter(|[_, src]| *src == block.id())   // faces inherited from `block`
