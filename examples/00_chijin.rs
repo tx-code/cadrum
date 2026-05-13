@@ -1,6 +1,6 @@
 //! Build a chijin (hand drum from Amami Oshima) with colors, boolean ops, and SVG export.
 
-use cadrum::{Color, Compound, DVec3, Edge, ProfileOrient, Solid};
+use cadrum::{Color, DVec3, Edge, ProfileOrient, Solid};
 use std::f64::consts::PI;
 
 pub fn chijin() -> Result<Solid, cadrum::Error> {
@@ -45,12 +45,11 @@ pub fn chijin() -> Result<Solid, cadrum::Error> {
 	let blocks: [Solid; N] = std::array::from_fn(|i| block_proto.clone().rotate_z(angle(i)).color(color(i)));
 	let holes: [Solid; N] = std::array::from_fn(|i| hole_proto.clone().rotate_z(angle(i)));
 	// ── Assemble with boolean operations: union, subtract, union ─────────
-	let result = [cylinder]
-		.union(&sheets)?
-		.subtract(&holes)?
-		.union(&blocks)?;
-	assert!(result.len() == 1);
-	Ok(result.into_iter().next().unwrap())
+	let mut result = (&(&cylinder + &sheets[0])? + &sheets[1])?;
+	for i in 0..N{
+		result=(&(&result - &holes[i])? + &blocks[i])?
+	}
+	Ok(result)
 }
 
 fn main() -> Result<(), cadrum::Error> {

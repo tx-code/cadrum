@@ -76,6 +76,9 @@
 //!   黙って無視される
 //! - 同名メソッドは子トレイト優先で重複排除される（親のオーバーライド）
 //! - ヘッダ行は1行に収めること（`where` 句を改行して書くと検出されない）
+//! - `where` 節は `: A + B + C where ...` の形で同一行に書いてよい。パーサーは
+//!   ` where ` 以降を supertrait リストから切り落とすため `Add + Sub` のような
+//!   `+` を含む bound が where 句にあっても supertrait 抽出を汚染しない
 //!
 //! メソッドシグネチャ:
 //! - fn シグネチャは1行に収めること（`where` 句・ライフタイム・ジェネリクス引数も同じ行）
@@ -91,6 +94,8 @@
 //! その他:
 //! - `#[cfg(...)]` は直前1行のみ認識し、続く fn に付与される
 //! - `type Foo;` などの associated type 宣言は無視される（メソッド生成対象外）
+
+use std::{iter::{Product, Sum}, ops::{Add, Mul, Sub}};
 
 #[cfg(feature = "color")]
 use crate::common::color::Color;
@@ -519,7 +524,7 @@ pub trait FaceStruct: Sized {
 ///
 /// Associated types `Edge`/`Face` keep this trait backend-independent: each
 /// backend (occt / pure) binds them to its own concrete types in the impl.
-pub trait SolidStruct: Sized + Clone + Compound {
+pub trait SolidStruct: Sized + Clone + Compound where for<'a> &'a Self: Add<Output = Result<Self, Error>> + Sub<Output = Result<Self, Error>> + Mul<Output = Result<Self, Error>>, for<'a> Result<Self, Error>: Sum<&'a Self> + Product<&'a Self> {
 	type Edge: EdgeStruct;
 	type Face: FaceStruct;
 
@@ -655,9 +660,12 @@ pub trait SolidStruct: Sized + Clone + Compound {
 	/// cross-section direction (always closed).
 	fn bspline(u: usize, v: usize, u_periodic: bool, point: impl Fn(usize, usize) -> DVec3) -> Result<Self, Error>;
 
-	// --- Boolean primitives (consumed by Compound::union/subtract/intersect wrappers) ---
+	// --- Boolean primitives (FFI への唯一の通路) ---
 	// Per-result-Solid face derivation history is attached to each Solid via
 	// `Solid::iter_history()`; no separate metadata channel.
+	// NOTE: multi-args / multi-tools セマンティクスは OCCT 仕様上「グループ内自己交差は
+	// 未定義」となるため将来的に単体×単体ラッパー (`Solid::union/subtract/intersect`)
+	// を公開し本関数群はそれらの内部実装として残る予定。
 	fn boolean_union<'a, 'b>(a: impl IntoIterator<Item = &'a Self>, b: impl IntoIterator<Item = &'b Self>) -> Result<Vec<Self>, Error> where Self: 'a + 'b;
 	fn boolean_subtract<'a, 'b>(a: impl IntoIterator<Item = &'a Self>, b: impl IntoIterator<Item = &'b Self>) -> Result<Vec<Self>, Error> where Self: 'a + 'b;
 	fn boolean_intersect<'a, 'b>(a: impl IntoIterator<Item = &'a Self>, b: impl IntoIterator<Item = &'b Self>) -> Result<Vec<Self>, Error> where Self: 'a + 'b;
@@ -682,8 +690,14 @@ pub trait SolidStruct: Sized + Clone + Compound {
 ///
 /// **コレクション最小契約**: 実装者は要素列挙 (`iter_elem`) と要素全置換 (`map_elem`)
 /// の 2 つだけを提供する。volume / area / bounding_box / center / inertia / contains /
-/// color / color_clear / union / subtract / intersect は default で提供され、
-/// 内部で `<Self::Elem as SolidStruct>::xxx(s)` を `iter_elem` 結果に対して集約する。
+/// color / color_clear は default で提供され、内部で `<Self::Elem as SolidStruct>::xxx(s)`
+/// を `iter_elem` 結果に対して集約する。
+///
+/// **boolean 演算は意図的に非対応**: `union/subtract/intersect` は `SolidStruct::boolean_*`
+/// (FFI 直通) のみが正路。OCCT の multi-args/multi-tools セマンティクスは
+/// 「グループ間の交差のみ処理し、グループ内自己交差は未定義/破綻」する設計のため、
+/// `Compound` レベルで集合論的な期待を持たせる API は罠を増やすだけ。
+/// 詳細は `notes/20260514-boolean演算は単体x単体のみ公開する方針.md`。
 ///
 /// **fallible op の意図的な不在**: `clean` は `SolidStruct` のみに置き、`Compound` には
 /// 載せない。fallible メソッドを default 化すると `try_map_elem` 相当の追加要求が必要
@@ -696,7 +710,7 @@ pub trait SolidStruct: Sized + Clone + Compound {
 /// `vec.translate(...)` / `[a,b].rotate_z(...)` on collections — no separate
 /// `Transform` import is needed (and none is possible from outside the crate).
 pub trait Compound: Transform {
-	type Elem: Compound+SolidStruct;
+	type Elem: Compound;
 
 	/// Borrow each element. For `Solid` itself this yields `std::iter::once(self)`;
 	/// for `Vec<T>` / `[T; N]` it yields `self.iter()`.
@@ -750,18 +764,7 @@ pub trait Compound: Transform {
 		self.map_elem(|s| <Self::Elem as Compound>::color_clear(s))
 	}
 
-	// --- Boolean (default — feed iter_elem to SolidStruct::boolean_*) ---
-	// Each result Solid carries its face-derivation history; access via
-	// `Solid::iter_history()`.
-	fn union<'a>(&self, tool: impl IntoIterator<Item = &'a Self::Elem>) -> Result<Vec<Self::Elem>, Error> where Self::Elem: 'a {
-		Self::Elem::boolean_union(self.iter_elem(), tool)
-	}
-	fn subtract<'a>(&self, tool: impl IntoIterator<Item = &'a Self::Elem>) -> Result<Vec<Self::Elem>, Error> where Self::Elem: 'a {
-		Self::Elem::boolean_subtract(self.iter_elem(), tool)
-	}
-	fn intersect<'a>(&self, tool: impl IntoIterator<Item = &'a Self::Elem>) -> Result<Vec<Self::Elem>, Error> where Self::Elem: 'a {
-		Self::Elem::boolean_intersect(self.iter_elem(), tool)
-	}
+	// Boolean は意図的に非搭載。SolidStruct::boolean_union/subtract/intersect を直接使う。
 	////////// codegen.rs
 	fn translate(self, translation: DVec3) -> Self { <Self as Transform>::translate(self, translation) }
 	fn rotate(self, axis_origin: DVec3, axis_direction: DVec3, angle: f64) -> Self { <Self as Transform>::rotate(self, axis_origin, axis_direction, angle) }
@@ -787,7 +790,7 @@ impl<T: Transform> Transform for Vec<T> {
 	fn mirror(self, o: DVec3, n: DVec3) -> Self { self.into_iter().map(|s| s.mirror(o, n)).collect() }
 }
 
-impl<T: SolidStruct> Compound for Vec<T> {
+impl<T: SolidStruct> Compound for Vec<T> where for<'a> &'a T: Add<Output = Result<T, Error>> + Sub<Output = Result<T, Error>> + Mul<Output = Result<T, Error>>, for<'a> Result<T, Error>: Sum<&'a T> + Product<&'a T> {
 	type Elem = T;
 	fn iter_elem(&self) -> impl Iterator<Item = &T> + '_ { self.iter() }
 	fn map_elem(self, f: impl FnMut(T) -> T) -> Self { self.into_iter().map(f).collect() }
@@ -802,7 +805,7 @@ impl<T: Transform, const N: usize> Transform for [T; N] {
 	fn mirror(self, o: DVec3, n: DVec3) -> Self { self.map(|s| s.mirror(o, n)) }
 }
 
-impl<T: SolidStruct, const N: usize> Compound for [T; N] {
+impl<T: SolidStruct, const N: usize> Compound for [T; N] where for<'a> &'a T: Add<Output = Result<T, Error>> + Sub<Output = Result<T, Error>> + Mul<Output = Result<T, Error>>, for<'a> Result<T, Error>: Sum<&'a T> + Product<&'a T> {
 	type Elem = T;
 	fn iter_elem(&self) -> impl Iterator<Item = &T> + '_ { self.iter() }
 	fn map_elem(self, f: impl FnMut(T) -> T) -> Self { self.map(f) }

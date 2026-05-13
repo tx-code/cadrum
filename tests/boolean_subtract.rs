@@ -1,4 +1,4 @@
-use cadrum::{Compound, Solid};
+use cadrum::Solid;
 use glam::DVec3;
 use std::time::{Duration, Instant};
 
@@ -18,7 +18,7 @@ fn run_subtract(offset: DVec3, optimized: bool) -> (Duration, Vec<Solid>) {
 	let b = make_toruses(offset);
 	let t0 = Instant::now();
 	let (results, skipped) = if !optimized {
-		(a.subtract(&b).unwrap(), 0)
+		(Solid::boolean_subtract(&a, &b).unwrap(), 0)
 	} else {
 		let bboxes_b: Vec<[DVec3; 2]> = b.iter().map(|s| s.bounding_box()).collect();
 
@@ -32,7 +32,7 @@ fn run_subtract(offset: DVec3, optimized: bool) -> (Duration, Vec<Solid>) {
 				skipped += 1;
 				results.push(sa.clone());
 			} else {
-				let r = sa.subtract(tools.iter().copied()).unwrap();
+				let r = Solid::boolean_subtract([sa], tools.iter().copied()).unwrap();
 				results.extend(r);
 			}
 		}

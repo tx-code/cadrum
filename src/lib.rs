@@ -113,9 +113,6 @@ impl Solid{
 	pub fn color(self, color: impl Into<Color>) -> crate::Solid {<Self as crate::traits::Compound>::color(self, color)}
 	#[cfg(feature = "color")]
 	pub fn color_clear(self) -> crate::Solid {<Self as crate::traits::Compound>::color_clear(self)}
-	pub fn union<'a>(&self, tool: impl IntoIterator<Item = &'a crate::Solid>) -> Result<Vec<crate::Solid>, Error> where crate::Solid: 'a {<Self as crate::traits::Compound>::union(self, tool)}
-	pub fn subtract<'a>(&self, tool: impl IntoIterator<Item = &'a crate::Solid>) -> Result<Vec<crate::Solid>, Error> where crate::Solid: 'a {<Self as crate::traits::Compound>::subtract(self, tool)}
-	pub fn intersect<'a>(&self, tool: impl IntoIterator<Item = &'a crate::Solid>) -> Result<Vec<crate::Solid>, Error> where crate::Solid: 'a {<Self as crate::traits::Compound>::intersect(self, tool)}
 	pub fn translate(self, translation: DVec3) -> crate::Solid {<Self as crate::traits::Compound>::translate(self, translation)}
 	pub fn rotate(self, axis_origin: DVec3, axis_direction: DVec3, angle: f64) -> crate::Solid {<Self as crate::traits::Compound>::rotate(self, axis_origin, axis_direction, angle)}
 	pub fn rotate_x(self, angle: f64) -> crate::Solid {<Self as crate::traits::Compound>::rotate_x(self, angle)}

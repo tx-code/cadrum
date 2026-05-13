@@ -2,7 +2,7 @@
 
 #![cfg(feature = "color")]
 
-use cadrum::{Color, Compound, Solid};
+use cadrum::{Color, Solid};
 use glam::DVec3;
 use std::fs;
 
@@ -58,7 +58,7 @@ fn bin_colorless_shape_roundtrip() {
 fn bin_roundtrip_after_boolean() {
 	let cube = read_colored_box();
 	let half = [Solid::half_space(DVec3::ZERO, DVec3::NEG_Z)];
-	let solids = cube.intersect(&half).expect("intersect should succeed");
+	let solids = Solid::boolean_intersect(&cube, &half).expect("intersect should succeed");
 
 	assert!(colormap_len(&solids) >= 1, "at least one color should survive intersect");
 

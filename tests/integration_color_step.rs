@@ -5,7 +5,7 @@
 
 #![cfg(feature = "color")]
 
-use cadrum::{Compound, Solid};
+use cadrum::Solid;
 use glam::DVec3;
 use std::fs;
 
@@ -70,7 +70,7 @@ fn intersect_colored_step_preserves_colors() {
 
 	// Half-space keeping z > 0 side.
 	let half = [Solid::half_space(DVec3::ZERO, DVec3::Z)];
-	let solids = cube.intersect(&half).expect("intersect should succeed");
+	let solids = Solid::boolean_intersect(&cube, &half).expect("intersect should succeed");
 
 	// At least one face should have kept its color.
 	assert!(colormap_len(&solids) >= 1, "at least one face should keep its color after intersect, got 0");

@@ -609,20 +609,6 @@ impl Compound for Solid {
 		Self::new(self.inner, std::collections::HashMap::new(), self.history)
 	}
 
-	// ==================== Boolean ====================
-
-	fn union<'a>(&self, tool: impl IntoIterator<Item = &'a Solid>) -> Result<Vec<Solid>, Error> {
-		<Solid as SolidStruct>::boolean_union([self], tool)
-	}
-
-	fn subtract<'a>(&self, tool: impl IntoIterator<Item = &'a Solid>) -> Result<Vec<Solid>, Error> {
-		<Solid as SolidStruct>::boolean_subtract([self], tool)
-	}
-
-	fn intersect<'a>(&self, tool: impl IntoIterator<Item = &'a Solid>) -> Result<Vec<Solid>, Error> {
-		<Solid as SolidStruct>::boolean_intersect([self], tool)
-	}
-	
 	fn iter_elem(&self) -> impl Iterator<Item = &Self::Elem> + '_ {
 		panic!("Cannot iter_elem on Solid, because Solid is not Compound");
 		#[allow(unreachable_code)] std::iter::empty()
@@ -707,5 +693,80 @@ impl Solid {
 
 	pub(crate) fn boolean_intersect_impl<'a, 'b>(a: impl IntoIterator<Item = &'a Solid>, b: impl IntoIterator<Item = &'b Solid>) -> Result<Vec<Solid>, Error> {
 		Self::boolean_op_impl(a, b, BOOLEAN_OP_COMMON)
+	}
+}
+
+// ==================== `+` / `-` / `*` for &Solid ====================
+//
+// 単体×単体 boolean のシンタックスシュガー。戻り値は Vec ではなく単一 Solid:
+// 結果が 1 個でなければ `Error::OneFailed(n)` を返す。複数ピースになりうる
+// 演算では本演算子は使わず `Solid::boolean_*` を直接使うこと。
+//
+// `&Solid` に impl する理由: `Solid` 自身を consume すると clone コストが嵩む。
+// `&a + &b` で書ける。
+
+fn exactly_one(mut v: Vec<Solid>) -> Result<Solid, Error> {
+	match v.len() {
+		1 => Ok(v.pop().unwrap()),
+		n => Err(Error::OneFailed(n)),
+	}
+}
+
+impl std::ops::Add for &Solid {
+	type Output = Result<Solid, Error>;
+	fn add(self, rhs: &Solid) -> Self::Output {
+		exactly_one(Solid::boolean_union([self], [rhs])?)
+	}
+}
+
+impl std::ops::Sub for &Solid {
+	type Output = Result<Solid, Error>;
+	fn sub(self, rhs: &Solid) -> Self::Output {
+		exactly_one(Solid::boolean_subtract([self], [rhs])?)
+	}
+}
+
+impl std::ops::Mul for &Solid {
+	type Output = Result<Solid, Error>;
+	fn mul(self, rhs: &Solid) -> Self::Output {
+		exactly_one(Solid::boolean_intersect([self], [rhs])?)
+	}
+}
+
+// `iter.sum::<Result<Solid, Error>>()` / `iter.product::<Result<Solid, Error>>()` で
+// `&Solid` イテレータを union / intersect で畳む。空イテレータは `Err(OneFailed(0))`。
+//
+// **中間結果は `Vec<Solid>` のまま保持**し、終端でのみ「単一 Solid か」をチェックする。
+// `&acc + s` を `try_fold` で連鎖させると中間が複数 Solid になった瞬間 OneFailed で
+// 打ち切られ、オリンピックの輪のような「最終的には 1 連結体だが演算順序によっては
+// 途中で複数ピースになる」ケースを誤って失敗扱いにしてしまう。例: 5 つの輪を
+// 1→3→5→2→4 の順で fold すると 1+3 の時点で disjoint だが、最後の 4 で全体が連結する。
+//
+// 戻り型を `Solid` ではなく `Result<Solid, Error>` にしているのは、`Sum::sum` が
+// `-> Self` で panic か Result しか選択肢がなく、CAD 文脈で panic は避けたいため。
+//
+// `Sum<&'a Solid> for &'a Solid` (= ユーザー初稿) は戻り型 `&Solid` が新規所有値の
+// 借用となり成立しない。`Sum<&'a Solid> for Result<Solid, Error>` で
+// 「`&Solid` を畳んで Owned な Solid を Result でくるんで返す」と素直に書ける。
+
+impl<'a> std::iter::Sum<&'a Solid> for Result<Solid, Error> {
+	fn sum<I: Iterator<Item = &'a Solid>>(mut iter: I) -> Self {
+		let first = iter.next().ok_or(Error::OneFailed(0))?;
+		let mut acc: Vec<Solid> = vec![first.clone()];
+		for s in iter {
+			acc = Solid::boolean_union(&acc, [s])?;
+		}
+		exactly_one(acc)
+	}
+}
+
+impl<'a> std::iter::Product<&'a Solid> for Result<Solid, Error> {
+	fn product<I: Iterator<Item = &'a Solid>>(mut iter: I) -> Self {
+		let first = iter.next().ok_or(Error::OneFailed(0))?;
+		let mut acc: Vec<Solid> = vec![first.clone()];
+		for s in iter {
+			acc = Solid::boolean_intersect(&acc, [s])?;
+		}
+		exactly_one(acc)
 	}
 }
