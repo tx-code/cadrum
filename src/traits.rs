@@ -705,7 +705,7 @@ pub trait SolidStruct: Sized + Clone + Compound {
 /// `vec.translate(...)` / `[a,b].rotate_z(...)` on collections — no separate
 /// `Transform` import is needed (and none is possible from outside the crate).
 pub trait Compound: Transform {
-	type Elem: Compound+SolidStruct;
+	type Elem: Compound;
 
 	/// Borrow each element. For `Solid` itself this yields `std::iter::once(self)`;
 	/// for `Vec<T>` / `[T; N]` it yields `self.iter()`.
