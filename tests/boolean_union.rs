@@ -1,0 +1,154 @@
+use cadrum::{Compound, Solid};
+use glam::DVec3;
+
+#[test]
+fn test_union_cylinders() {
+	// 互いに自己交差している円柱
+
+	let a = Solid::cylinder(1.1, DVec3::Z, 1.0).translate(DVec3::new(1.0, 0.0, 0.0));
+	let b = Solid::cylinder(1.1, DVec3::Z, 1.0).translate(DVec3::new(-1.0, 0.0, 0.0));
+	let c = Solid::cylinder(1.1, DVec3::Z, 1.0).translate(DVec3::new(0.0, 1.0, 0.0));
+	let d = Solid::cylinder(1.1, DVec3::Z, 1.0).translate(DVec3::new(0.0, -1.0, 0.0));
+
+	let union_a_b = [a.clone()].union(&[b.clone()]).unwrap();
+	println!("union([A], [B]) solid count: {}", union_a_b.len());
+
+	let union_ab_cd = [a.clone(), b.clone()].union(&[c.clone(), d.clone()]).unwrap();
+
+	println!("union([A, B], [C, D]) solid count: {}", union_ab_cd.len());
+
+	let all = [a, b, c, d];
+	let union_all_all = all.union(&all).unwrap();
+	println!("union([ABCD], [ABCD]) solid count: {}", union_all_all.len());
+
+	// Output:
+	// union([A], [B]) solid count: 1
+	// union([A, B], [C, D]) solid count: 4
+	// union([ABCD], [ABCD]) solid count: 4
+	// test test_union_cylinders ... ok
+	//
+}
+
+#[test]
+fn test_union_shifted() {
+	// ユーザー指定の座標 (AとBの距離=2.0なので実はr=1.1だと自己交差する)
+	let a = Solid::cylinder(1.1, DVec3::Z, 1.0);
+	let b = Solid::cylinder(1.1, DVec3::Z, 1.0).translate(DVec3::new(2.0, 0.0, 0.0));
+	let c = Solid::cylinder(1.1, DVec3::Z, 1.0).translate(DVec3::new(0.0, 1.0, 0.0));
+	let d = Solid::cylinder(1.1, DVec3::Z, 1.0).translate(DVec3::new(2.0, 1.0, 0.0));
+
+	let union_ab_cd = [a.clone(), b.clone()].union(&[c.clone(), d.clone()]).unwrap();
+	println!("union([A(0,0), B(2,0)], [C(0,1), D(2,1)]) solid count: {}", union_ab_cd.len());
+
+	// 完全にグループ内が自己交差しない座標 (AとBの距離=4.0 > 2.2)
+	let a_sep = Solid::cylinder(1.1, DVec3::Z, 1.0);
+	let b_sep = Solid::cylinder(1.1, DVec3::Z, 1.0).translate(DVec3::new(4.0, 0.0, 0.0));
+	let c_sep = Solid::cylinder(1.1, DVec3::Z, 1.0).translate(DVec3::new(0.0, 1.0, 0.0));
+	let d_sep = Solid::cylinder(1.1, DVec3::Z, 1.0).translate(DVec3::new(4.0, 1.0, 0.0));
+
+	let union_sep = [a_sep.clone(), b_sep.clone()].union(&[c_sep.clone(), d_sep.clone()]).unwrap();
+	println!("union([A(0,0), B(4.0,0)], [C(0,1), D(4.0,1)]) solid count: {}", union_sep.len());
+
+	// 結論をプリントする
+	println!("\n=== 結論 (Conclusion) ===");
+	println!("距離が2.0の場合: 引数(A,B)の配列内ですでに自己交差しているため、1つのSolidに自動結合されず2個のままになります。");
+	println!("距離が4.0の場合: 配列内で自己交差がないため、A-CとB-Dの重なりが正しく結合され、2個のSolid(ACの融合体, BDの融合体)になります。");
+	println!("つまり、OpenCASCADEの Boolean演算(Fuse) は「グループ間の交差」のみを融合し、「グループ内部(同一配列内)の交差」は無視して結合してくれません。");
+	println!("複数の重なるソリッドを結合したい場合は、内部で自己交差のない引数を作るか、事前結合(Sewing/逐次Fuseなど)が必要です。");
+	println!("==========================\n");
+}
+
+#[test]
+fn test_subtract_sphere_with_multiple_holes() {
+	// 球の中心を通る3本(X/Y/Z軸)の円柱穴を一括 subtract する。
+	// tools=[hole_x, hole_y, hole_z] は中心で互いに交差している(tools内自己交差)。
+	// 期待: 球から3本の直交穴が抜かれた1つの Solid
+	let sphere = Solid::sphere(5.0);
+	let len = 12.0;
+	let half = len / 2.0;
+	let r = 1.0;
+	let hole_x = Solid::cylinder(r, DVec3::X, len).translate(DVec3::new(-half, 0.0, 0.0));
+	let hole_y = Solid::cylinder(r, DVec3::Y, len).translate(DVec3::new(0.0, -half, 0.0));
+	let hole_z = Solid::cylinder(r, DVec3::Z, len).translate(DVec3::new(0.0, 0.0, -half));
+
+	let multi = [sphere.clone()].subtract(&[hole_x.clone(), hole_y.clone(), hole_z.clone()]).unwrap();
+	let multi_vol: f64 = multi.iter().map(|s| s.volume()).sum();
+	println!("subtract sphere - [X,Y,Z holes] (multi-tools): count={}, volume={:.4}", multi.len(), multi_vol);
+	write_outputs(&multi, "subtract_sphere_multi");
+
+	// 逐次: 1個ずつ引く
+	let mut current = vec![sphere.clone()];
+	for tool in [&hole_x, &hole_y, &hole_z] {
+		current = current.iter().flat_map(|o| [o.clone()].subtract(&[tool.clone()]).unwrap()).collect();
+	}
+	let seq_vol: f64 = current.iter().map(|s| s.volume()).sum();
+	println!("subtract sphere - X then Y then Z (sequential):    count={}, volume={:.4}", current.len(), seq_vol);
+	write_outputs(&current, "subtract_sphere_sequential");
+
+	// === 結論 ===
+	// multi-tools: count=1, volume=430.30
+	// sequential : count=1, volume=441.61
+	// V(sphere)=523.598、V(cyl∩sphere)=31.10 (1本)、V(∪3本 inside sphere)=81.93。
+	// 期待値は 523.6 - 81.9 = 441.7 で sequential と一致。
+	// multi-tools は 523.6 - 93.3 = 430.3、つまり Σ V(cyl_i ∩ sphere) を引いていて、
+	// 重なり領域(bicyl/tricyl)を2重・3重カウントしている。
+	// → tools 同士が交差する場合、multi-tools subtract は体積が物理的に意味を失う。
+	// → tools 内で交差が無い保証がなければ pairwise/逐次 subtract を使うべき。
+}
+
+#[test]
+fn test_intersect_sphere_with_multiple_cylinders() {
+	// 球 ∩ [複数方向の円柱]
+	// 質問: OCCT の multi-tools Common は
+	//   (a) obj ∩ (tool1 ∪ tool2 ∪ ...)  → ウニの胴体(3本のシリンダ和と球の積)
+	//   (b) obj ∩ tool1 ∩ tool2 ∩ ...   → 中心の3本全部が重なる領域のみ
+	let sphere = Solid::sphere(5.0);
+	let r = 0.8;
+	let len = 20.0;
+	let half = len / 2.0;
+	let cyl_x = Solid::cylinder(r, DVec3::X, len).translate(DVec3::new(-half, 0.0, 0.0));
+	let cyl_y = Solid::cylinder(r, DVec3::Y, len).translate(DVec3::new(0.0, -half, 0.0));
+	let cyl_z = Solid::cylinder(r, DVec3::Z, len).translate(DVec3::new(0.0, 0.0, -half));
+
+	let multi = [sphere.clone()].intersect(&[cyl_x.clone(), cyl_y.clone(), cyl_z.clone()]).unwrap();
+	let multi_vol: f64 = multi.iter().map(|s| s.volume()).sum();
+	println!("intersect sphere ∩ [cyl_x, cyl_y, cyl_z]: count={}, volume={:.4}", multi.len(), multi_vol);
+	write_outputs(&multi, "intersect_sphere_multi");
+
+	let v_x: f64 = [sphere.clone()].intersect(&[cyl_x.clone()]).unwrap().iter().map(|s| s.volume()).sum();
+	let v_y: f64 = [sphere.clone()].intersect(&[cyl_y.clone()]).unwrap().iter().map(|s| s.volume()).sum();
+	let v_z: f64 = [sphere.clone()].intersect(&[cyl_z.clone()]).unwrap().iter().map(|s| s.volume()).sum();
+
+	// 逐次 intersect: obj ∩ X ∩ Y ∩ Z
+	let mut current = vec![sphere.clone()];
+	for tool in [&cyl_x, &cyl_y, &cyl_z] {
+		current = current.iter().flat_map(|o| [o.clone()].intersect(&[tool.clone()]).unwrap()).collect();
+	}
+	let seq_vol: f64 = current.iter().map(|s| s.volume()).sum();
+
+	println!("  sphere ∩ cyl_x = {:.4}", v_x);
+	println!("  sphere ∩ cyl_y = {:.4}", v_y);
+	println!("  sphere ∩ cyl_z = {:.4}", v_z);
+	println!("  sphere ∩ X ∩ Y ∩ Z (sequential) = {:.4} (count={})", seq_vol, current.len());
+	write_outputs(&current, "intersect_sphere_sequential");
+
+	// === 結論 ===
+	// multi-tools: count=3, volume=59.93 (≒ V(sphere∩cyl_x) × 3)
+	// sequential : count=1, volume=2.40 (= sphere ∩ cyl_x ∩ cyl_y ∩ cyl_z)
+	// multi-tools intersect は (a)「∩(∪tools)」でも (b)「∩ tool1 ∩ tool2 ∩ ...」でもなく、
+	// 「各 tool に対する sphere∩tool_i を別々の Solid として返す」挙動。
+	// = OCCT General BOP の「Object×Tool の各ペアごとに分割ピースを出力」設計の表れ。
+	// → ユーザーが集合論的に期待する intersect の意味論を持たない。
+	// → 単一 tool での sphere.intersect(&cyl) を逐次 fold するのが正しい。
+}
+
+/// solid を out/ 以下に SVG, STL, STEP で書き出す。
+fn write_outputs(solids: &[Solid], name: &str) {
+	std::fs::create_dir_all("out").unwrap();
+	let mut f = std::fs::File::create(format!("out/{name}.step")).unwrap();
+	cadrum::Solid::write_step(solids, &mut f).expect("step write");
+	let mut f = std::fs::File::create(format!("out/{name}.stl")).unwrap();
+	cadrum::Solid::mesh(solids, 0.1).and_then(|m| m.write_stl(&mut f)).expect("stl write");
+	let mut f = std::fs::File::create(format!("out/{name}.svg")).unwrap();
+	cadrum::Solid::mesh(solids, 0.5).and_then(|m| m.write_svg(DVec3::new(1.0, 1.0, 2.0), DVec3::Z, true, false, &mut f)).expect("svg write");
+}
