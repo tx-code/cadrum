@@ -170,7 +170,7 @@ fn render_assets(entry: &Entry, outputs: &[(PathBuf, Vec<u8>)]) -> String {
 			let name = p.to_str()?;
 			if !name.starts_with(stem) { return None; }
 			match p.extension().and_then(|e| e.to_str()) {
-				Some("svg") => Some(format!("\n<p align=\"center\">\n  <img src=\"https://lzpel.github.io/cadrum/{name}\" alt=\"{stem}\" width=\"360\"/>\n</p>")),
+				Some("svg") => Some(format!("- [{name}](https://lzpel.github.io/cadrum/{name})\n\n<div align=center><img src='https://lzpel.github.io/cadrum/{name}' alt='{stem}' width='360'/></div>\n")),
 				Some("step" | "brep" | "stl" | "png") => Some(format!("- [{name}](https://lzpel.github.io/cadrum/{name})")),
 				_ => None,
 			}
