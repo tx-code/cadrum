@@ -29,7 +29,7 @@ fn test_union_disjoint() {
 	let b = Solid::cylinder(1.1, DVec3::Z, 1.0).translate(DVec3::new(4.0, 0.0, 0.0));
 	let c = Solid::cylinder(1.1, DVec3::Z, 1.0).translate(DVec3::new(0.0, 1.0, 0.0));
 	let d = Solid::cylinder(1.1, DVec3::Z, 1.0).translate(DVec3::new(4.0, 1.0, 0.0));
-	let v: Vec<Solid> = [&a, &b, &c, &d].into_iter().sum::<Boolean<Solid>>().build_vec().unwrap();
+	let v: Vec<Solid> = [&a, &b, &c, &d].into_iter().map(Boolean::from).reduce(|a, b| a + b).unwrap().build_vec().unwrap();
 	// A∪C と B∪D の 2 グループに分かれる (重なる距離 1.0 で連結)
 	assert!(v.len() == 2, "disjoint groups should be 2 solids, got {}", v.len());
 }
@@ -40,7 +40,7 @@ fn test_union_all_connected() {
 	let a = cube(10.0, 10.0, 10.0, 0.0, 0.0, 0.0);
 	let b = cube(10.0, 10.0, 10.0, 3.0, 3.0, 3.0);
 	let c = cube(10.0, 10.0, 10.0, 6.0, 6.0, 6.0);
-	let s: Solid = [&a, &b, &c].into_iter().sum::<Boolean<Solid>>().build().unwrap();
+	let s: Solid = [&a, &b, &c].into_iter().map(Boolean::from).reduce(|a, b| a + b).unwrap().build().unwrap();
 	// a と c は重なっていない場合がある (距離 6 vs 辺 10) — overlap あるので 1 個
 	assert!(s.volume() > a.volume(), "union volume should grow");
 }
@@ -59,20 +59,20 @@ fn test_union_olympic_rings_out_of_order() {
 	let ring5 = mk(4.0);
 
 	// out-of-order でも順番通りでも同じ結果
-	let out_of_order: Solid = [&ring1, &ring3, &ring5, &ring2, &ring4].into_iter().sum::<Boolean<Solid>>().build().unwrap();
-	let in_order: Solid = [&ring1, &ring2, &ring3, &ring4, &ring5].into_iter().sum::<Boolean<Solid>>().build().unwrap();
+	let out_of_order: Solid = [&ring1, &ring3, &ring5, &ring2, &ring4].into_iter().map(Boolean::from).reduce(|a, b| a + b).unwrap().build().unwrap();
+	let in_order: Solid = [&ring1, &ring2, &ring3, &ring4, &ring5].into_iter().map(Boolean::from).reduce(|a, b| a + b).unwrap().build().unwrap();
 
 	assert!((out_of_order.volume() - in_order.volume()).abs() < 1e-6,
 		"order-independent: {} vs {}", out_of_order.volume(), in_order.volume());
 }
 
-// ==================== intersect (`*` / `Product`) ====================
+// ==================== intersect (`*` / reduce) ====================
 
 #[test]
 fn test_intersect_two_cubes() {
 	let a = cube(10.0, 10.0, 10.0, 0.0, 0.0, 0.0);
 	let b = cube(10.0, 10.0, 10.0, 5.0, 0.0, 0.0); // overlap 5×10×10 = 500
-	let s: Solid = [&a, &b].into_iter().product::<Boolean<Solid>>().build().unwrap();
+	let s: Solid = [&a, &b].into_iter().map(Boolean::from).reduce(|x, y| x * y).unwrap().build().unwrap();
 	assert!((s.volume() - 500.0).abs() < 1e-3, "got {}", s.volume());
 }
 
@@ -88,7 +88,7 @@ fn test_intersect_sphere_with_multiple_cylinders() {
 	let cyl_y = Solid::cylinder(r, DVec3::Y, len).translate(DVec3::new(0.0, -half, 0.0));
 	let cyl_z = Solid::cylinder(r, DVec3::Z, len).translate(DVec3::new(0.0, 0.0, -half));
 
-	let multi: Solid = [&sphere, &cyl_x, &cyl_y, &cyl_z].into_iter().product::<Boolean<Solid>>().build().unwrap();
+	let multi: Solid = [&sphere, &cyl_x, &cyl_y, &cyl_z].into_iter().map(Boolean::from).reduce(|x, y| x * y).unwrap().build().unwrap();
 	// 中心の小さなボリュームのみ ≈ 2.4
 	assert!(multi.volume() > 0.0 && multi.volume() < 10.0, "expected small intersection volume, got {}", multi.volume());
 }
@@ -143,7 +143,7 @@ fn test_operator_overloads() {
 fn test_singleton_build() {
 	let a = Solid::cube(10.0, 10.0, 10.0);
 	let expected = a.volume();
-	let b = std::iter::once(&a).sum::<Boolean<Solid>>();
+	let b = std::iter::once(&a).map(Boolean::from).reduce(|x, y| x + y).unwrap(); // fold でも reduce でも同じ結果 (単一要素はそのまま)
 	let s: Solid = b.build().unwrap();
 	assert!((s.volume() - expected).abs() < 1e-6, "{} vs {}", s.volume(), expected);
 }
@@ -151,7 +151,7 @@ fn test_singleton_build() {
 #[test]
 fn test_empty_returns_error() {
 	let solids: Vec<Solid> = Vec::new();
-	match solids.iter().sum::<Boolean<Solid>>().build() {
+	match solids.iter().map(Boolean::from).reduce(|x, y| x + y).unwrap_or_else(Boolean::default).build() {
 		Err(cadrum::Error::OneFailed(0)) => {}
 		other => panic!("expected OneFailed(0), got {:?}", other.is_ok()),
 	}

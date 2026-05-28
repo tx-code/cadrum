@@ -25,12 +25,12 @@ fn main() -> Result<(), cadrum::Error> {
         .translate(DVec3::X*4.);
     let [cylinder0, cylinder1, cylinder2] = [cylinder.clone(), cylinder.clone().rotate_z(std::f64::consts::TAU/3.), cylinder.clone().rotate_z(-std::f64::consts::TAU/3.)];
 
-    // sum = union of all cylinders
-    let sum: Solid = [&cylinder0, &cylinder1, &cylinder2].into_iter().sum::<Boolean<Solid>>().build()?;
+    // union of all cylinders (fold from Boolean::default() = ⊥)
+    let sum: Solid = [&cylinder0, &cylinder1, &cylinder2].into_iter().map(Boolean::from).reduce(|a, s| a + s).unwrap().build()?;
     let sum = sum.color("#d875ff");
 
-    // product = intersection of all cylinders
-    let product: Solid = [&cylinder0, &cylinder1, &cylinder2].into_iter().product::<Boolean<Solid>>().build()?;
+    // intersection of all cylinders (reduce — intersect has no fixed init)
+    let product: Solid = [&cylinder0, &cylinder1, &cylinder2].into_iter().map(Boolean::from).reduce(|a, b| a * b).unwrap().build()?;
     let product = product.color("#00ff22");
 
     let shapes = [

@@ -5,12 +5,10 @@
 //! `notes/20260527-boolean演算の刷新.md` を参照。
 //!
 //! 終端評価は [`Boolean::build`] で単一 Solid、[`Boolean::build_vec`] で全ピース。
-//! FFI (`SolidStruct::boolean_build`) を 1 回呼び BOPAlgo_CellsBuilder が全交差を
-//! 1 パスで計算する。集約は `iter.sum()` / `iter.product()` (= union / intersect)。
+//! FFI (`SolidStruct::boolean_build`) を 1 回呼び BOPAlgo_CellsBuilder が全交差を1 パスで計算する。
 
 use crate::common::error::Error;
 use crate::traits::SolidStruct;
-use std::iter::{Product, Sum};
 use std::ops::{Add, Mul, Sub};
 
 pub struct Boolean<S: SolidStruct> {
@@ -193,22 +191,15 @@ boolean_lhs_ops!(Boolean<S>);
 boolean_lhs_ops!(S);
 boolean_lhs_ops!(&S);
 
-// ==================== Sum / Product (集約) ====================
+// ==================== Default (= ⊥ / union の単位元) ====================
 //
-// `&S` 列を union / intersect。空列は空 `Boolean` (`build()` で `OneFailed(0)`)。
-
-impl<'a, S: SolidStruct + 'a> Sum<&'a S> for Boolean<S> {
-	fn sum<I: Iterator<Item = &'a S>>(iter: I) -> Self {
-		iter.map(|s| S::boolean(std::iter::once(s), [1i64, 0]))
-			.reduce(Self::dnf_union)
-			.unwrap_or_else(|| S::boolean(std::iter::empty::<&S>(), std::iter::empty()))
-	}
-}
-
-impl<'a, S: SolidStruct + 'a> Product<&'a S> for Boolean<S> {
-	fn product<I: Iterator<Item = &'a S>>(iter: I) -> Self {
-		iter.map(|s| S::boolean(std::iter::once(s), [1i64, 0]))
-			.reduce(Self::dnf_intersect)
-			.unwrap_or_else(|| S::boolean(std::iter::empty::<&S>(), std::iter::empty()))
+// 空式 = ⊥ (空集合 / 何も選択していない)。`build()` は `OneFailed(0)`。
+// union を fold で畳むときの init に使う: `iter.fold(Boolean::default(), |a, s| a + s)`。
+// `dnf_union(default(), b) == b` なので union の単位元として正しい。
+// intersect では零元 (annihilator) になるため init に使ってはいけない — intersect の集約は
+// init を持たない `reduce(|a, b| a * b)` を使う (単位元 ⊤ は buildable な solid に表現不可)。
+impl<S: SolidStruct> Default for Boolean<S> {
+	fn default() -> Self {
+		Boolean { solids: Vec::new(), clauses: Vec::new() }
 	}
 }
