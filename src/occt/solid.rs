@@ -452,7 +452,41 @@ impl SolidStruct for Solid {
 		Boolean::from_parts(solids, clauses.into_iter().collect())
 	}
 	fn boolean_build(b: &Boolean<Self>) -> Result<Vec<Self>, Error> {
-		Self::boolean_build_impl(b.solids(), b.clauses())
+		// CellsBuilder ベースの一括評価。DIMACS-flat DNF (`clauses`) を C++ 側に渡す。
+		let (solids, clauses) = (b.solids(), b.clauses());
+		if solids.is_empty() || clauses.is_empty() {
+			return Err(Error::OneFailed(0));
+		}
+		debug_assert!(clauses.last() == Some(&0), "clauses must be 0-terminated");
+
+		let mut solid_vec = ffi::shape_vec_new();
+		for s in solids {
+			ffi::shape_vec_push(solid_vec.pin_mut(), s.inner());
+		}
+		let mut history: Vec<u64> = Default::default();
+		let inner = ffi::builder_cells(&solid_vec, clauses, &mut history);
+		if inner.is_null() { return Err(Error::BooleanOperationFailed); }
+
+		#[cfg(feature = "color")]
+		let colormap = {
+			let mut m = std::collections::HashMap::new();
+			for pair in history.chunks_exact(2) {
+				for s in solids {
+					if let Some(&c) = s.colormap.get(&pair[1]) {
+						m.entry(pair[0]).or_insert(c);
+						break;
+					}
+				}
+			}
+			m
+		};
+
+		let compound = CompoundShape::from_raw(
+			inner,
+			#[cfg(feature = "color")] colormap,
+			history,
+		);
+		Ok(compound.decompose())
 	}
 
 	// --- I/O (delegates to super::io helpers) ---
@@ -639,47 +673,6 @@ impl Clone for Solid {
 			colormap,
 			Default::default(),
 		)
-	}
-}
-
-// ==================== Boolean primitive (CellsBuilder ベース) ====================
-
-impl Solid {
-	/// CellsBuilder ベースの一括評価。DIMACS-flat DNF (`clauses`) を C++ 側に渡す。
-	pub(crate) fn boolean_build_impl(solids: &[Solid], clauses: &[i64]) -> Result<Vec<Solid>, Error> {
-		if solids.is_empty() || clauses.is_empty() {
-			return Err(Error::OneFailed(0));
-		}
-		debug_assert!(clauses.last() == Some(&0), "clauses must be 0-terminated");
-
-		let mut solid_vec = ffi::shape_vec_new();
-		for s in solids {
-			ffi::shape_vec_push(solid_vec.pin_mut(), s.inner());
-		}
-		let mut history: Vec<u64> = Default::default();
-		let inner = ffi::builder_cells(&solid_vec, clauses, &mut history);
-		if inner.is_null() { return Err(Error::BooleanOperationFailed); }
-
-		#[cfg(feature = "color")]
-		let colormap = {
-			let mut m = std::collections::HashMap::new();
-			for pair in history.chunks_exact(2) {
-				for s in solids {
-					if let Some(&c) = s.colormap.get(&pair[1]) {
-						m.entry(pair[0]).or_insert(c);
-						break;
-					}
-				}
-			}
-			m
-		};
-
-		let compound = CompoundShape::from_raw(
-			inner,
-			#[cfg(feature = "color")] colormap,
-			history,
-		);
-		Ok(compound.decompose())
 	}
 }
 
