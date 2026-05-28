@@ -676,22 +676,3 @@ impl Clone for Solid {
 	}
 }
 
-// ==================== `+` / `-` / `*` operators ====================
-//
-// 中核 (From / Boolean<S> 左辺の演算子) は src/common/boolean.rs。orphan rule で
-// generic 化できない裸 Solid/&Solid 左辺の糖衣だけをここで具象生成する。
-
-impl TryFrom<Boolean<Solid>> for Solid {
-	// orphan rule のため `TryFrom<Boolean<S>> for S` は具象 Solid 側に置く (`.build()`)。
-	type Error = Error;
-	fn try_from(b: Boolean<Solid>) -> Result<Self, Error> { b.build() }
-}
-
-use crate::traits::impl_solid_boolean_ops;
-impl_solid_boolean_ops!(Solid, Solid, Solid);
-impl_solid_boolean_ops!(Solid, Solid, &Solid);
-impl_solid_boolean_ops!(Solid, Solid, Boolean<Solid>);
-impl_solid_boolean_ops!(Solid, &Solid, Solid);
-impl_solid_boolean_ops!(Solid, &Solid, &Solid);
-impl_solid_boolean_ops!(Solid, &Solid, Boolean<Solid>);
-

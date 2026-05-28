@@ -118,3 +118,26 @@ impl Solid{
 	pub fn align_y(self, new_y: DVec3, z_hint: DVec3) -> crate::Solid {<Self as crate::traits::Compound>::align_y(self, new_y, z_hint)}
 	pub fn align_z(self, new_z: DVec3, x_hint: DVec3) -> crate::Solid {<Self as crate::traits::Compound>::align_z(self, new_z, x_hint)}
 }
+// ==================== Boolean Operations ====================
+macro_rules! impl_solid_boolean_ops {
+	($t:ty, $lhs:ty, $rhs:ty) => {
+		impl ::core::ops::Add<$rhs> for $lhs {
+			type Output = $crate::Boolean<$t>;
+			fn add(self, rhs: $rhs) -> $crate::Boolean<$t> { $crate::Boolean::from(self) + rhs }
+		}
+		impl ::core::ops::Sub<$rhs> for $lhs {
+			type Output = $crate::Boolean<$t>;
+			fn sub(self, rhs: $rhs) -> $crate::Boolean<$t> { $crate::Boolean::from(self) - rhs }
+		}
+		impl ::core::ops::Mul<$rhs> for $lhs {
+			type Output = $crate::Boolean<$t>;
+			fn mul(self, rhs: $rhs) -> $crate::Boolean<$t> { $crate::Boolean::from(self) * rhs }
+		}
+	};
+}
+impl_solid_boolean_ops!(Solid, Solid, Solid);
+impl_solid_boolean_ops!(Solid, Solid, &Solid);
+impl_solid_boolean_ops!(Solid, Solid, Boolean<Solid>);
+impl_solid_boolean_ops!(Solid, &Solid, Solid);
+impl_solid_boolean_ops!(Solid, &Solid, &Solid);
+impl_solid_boolean_ops!(Solid, &Solid, Boolean<Solid>);

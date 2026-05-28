@@ -851,27 +851,3 @@ impl<T: EdgeStruct, const N: usize> Wire for [T; N] {
 	fn map_elem(self, f: impl FnMut(T) -> T) -> Self { self.map(f) }
 }
 
-// ==================== Boolean 演算子の糖衣マクロ ====================
-//
-// 裸の `Solid`/`&Solid` 左辺の `+`/`-`/`*` を具象 backend 型向けに生成する。orphan rule
-// (E0210) で `impl<S: SolidStruct> Add for S` は不可なので、定義はここ・invoke は具象型を
-// 知る backend 側 (`impl_solid_boolean_ops!(Solid, &Solid, Boolean<Solid>)` 等)。本体は
-// LHS を `Boolean` に持ち上げ boolean.rs の generic 演算子へ委譲 (`$crate::` で展開)。
-macro_rules! impl_solid_boolean_ops {
-	($t:ty, $lhs:ty, $rhs:ty) => {
-		impl ::core::ops::Add<$rhs> for $lhs {
-			type Output = $crate::Boolean<$t>;
-			fn add(self, rhs: $rhs) -> $crate::Boolean<$t> { $crate::Boolean::from(self) + rhs }
-		}
-		impl ::core::ops::Sub<$rhs> for $lhs {
-			type Output = $crate::Boolean<$t>;
-			fn sub(self, rhs: $rhs) -> $crate::Boolean<$t> { $crate::Boolean::from(self) - rhs }
-		}
-		impl ::core::ops::Mul<$rhs> for $lhs {
-			type Output = $crate::Boolean<$t>;
-			fn mul(self, rhs: $rhs) -> $crate::Boolean<$t> { $crate::Boolean::from(self) * rhs }
-		}
-	};
-}
-pub(crate) use impl_solid_boolean_ops;
-
