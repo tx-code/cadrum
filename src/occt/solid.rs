@@ -678,18 +678,11 @@ impl Clone for Solid {
 
 // ==================== `+` / `-` / `*` operators ====================
 //
-// `Solid` / `&Solid` / `Boolean<Solid>` の任意組合せで演算でき、結果は
-// `Boolean<Solid>` (遅延式)。終端評価は `.build()` (= 単一 Solid) または
-// `.build_vec()` (= Vec<Solid>)。連結記法: `(&a + &b - &c * solid_d).build()?`
-//
-// 中核 (From<S>/From<&S>、および Boolean<S> を左辺とする全演算子) は generic に
-// src/common/boolean.rs にある。ここでは orphan rule で generic 化できない
-// 「裸の Solid/&Solid を左辺とする」糖衣だけを `traits::impl_solid_boolean_ops!`
-// で具象 Solid 向けに生成する。本体は LHS を `Boolean::from` で持ち上げ generic 演算子へ委譲。
+// 中核 (From / Boolean<S> 左辺の演算子) は src/common/boolean.rs。orphan rule で
+// generic 化できない裸 Solid/&Solid 左辺の糖衣だけをここで具象生成する。
 
 impl TryFrom<Boolean<Solid>> for Solid {
-	// `.build()` の終端評価。汎用 `impl<S: SolidStruct> TryFrom<Boolean<S>> for S` は
-	// orphan rule 違反なので具象 Solid 側に置く。
+	// orphan rule のため `TryFrom<Boolean<S>> for S` は具象 Solid 側に置く (`.build()`)。
 	type Error = Error;
 	fn try_from(b: Boolean<Solid>) -> Result<Self, Error> { b.build() }
 }

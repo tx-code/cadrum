@@ -1,30 +1,12 @@
 //! Boolean expression tree over Solids.
 //!
-//! `Boolean<S>` は `Solid` の `+`/`-`/`*` 演算子で構築される遅延式ツリー。
-//! 内部表現は **DIMACS-flat DNF** (`Vec<i64>` + 0 終端):
+//! `Boolean<S>` は `Solid` の `+`/`-`/`*` で構築される遅延式ツリー。内部表現は
+//! DIMACS-flat DNF (`Vec<i64>` + 0 終端)。エンコーディングと合成規則の詳細は
+//! `notes/20260527-boolean演算の刷新.md` を参照。
 //!
-//! - `+i` (i ≥ 1): `solids[i-1]` を AddToResult の `toTake` 側に
-//! - `-i`         : `toAvoid` 側に
-//! - `0`          : clause 終端 (末尾の `0` も必須)
-//!
-//! 例 (`solids = [A, B, C, D]`):
-//!
-//! | 式         | clauses                          |
-//! |---         |---                               |
-//! | `A + B`    | `[1, 0, 2, 0]`                   |
-//! | `A * B`    | `[1, 2, 0]`                      |
-//! | `A - B`    | `[1, -2, 0]`                     |
-//! | `A + B - C`| `[1, -3, 0, 2, -3, 0]`           |
-//! | `A - B*C`  | `[1, -2, 0, 1, -3, 0]`           |
-//!
-//! 終端評価は [`Boolean::build`] (= `TryInto<S>`) で単一 Solid、
-//! [`Boolean::build_vec`] (= `TryInto<Vec<S>>`) で全ピース。
-//! FFI は `SolidStruct::boolean_build` を 1 回だけ呼び、BOPAlgo_CellsBuilder
-//! が全交差を 1 パスで計算する。
-//!
-//! 集約: `iter.sum::<Boolean<S>>()` / `iter.product::<Boolean<S>>()` で
-//! `&S` のイテレータを union / intersect できる (`Sum<&S>` / `Product<&S>` 実装)。
-//! `+` / `*` 演算子と意味的に対応する。
+//! 終端評価は [`Boolean::build`] で単一 Solid、[`Boolean::build_vec`] で全ピース。
+//! FFI (`SolidStruct::boolean_build`) を 1 回呼び BOPAlgo_CellsBuilder が全交差を
+//! 1 パスで計算する。集約は `iter.sum()` / `iter.product()` (= union / intersect)。
 
 use crate::common::error::Error;
 use crate::traits::SolidStruct;
@@ -37,15 +19,13 @@ pub struct Boolean<S: SolidStruct> {
 }
 
 impl<S: SolidStruct> Boolean<S> {
-	/// バックエンドから solids + clauses を受け取って Boolean を組む。
-	/// `S::boolean(...)` 実装専用のコンストラクタ。
+	/// `S::boolean(...)` 専用コンストラクタ。
 	pub(crate) fn from_parts(solids: Vec<S>, clauses: Vec<i64>) -> Self {
 		Boolean { solids, clauses }
 	}
 
-	/// 内部表現を読むためのアクセサ (FFI から呼ぶ用途)。
+	/// 内部表現アクセサ (FFI 用)。
 	pub fn solids(&self) -> &[S] { &self.solids }
-	/// 内部表現を読むためのアクセサ (FFI から呼ぶ用途)。
 	pub fn clauses(&self) -> &[i64] { &self.clauses }
 
 	/// FFI を呼んで結果が単一 Solid なら返す。複数または 0 個なら `OneFailed(n)`。
@@ -65,16 +45,7 @@ impl<S: SolidStruct> Boolean<S> {
 		S::boolean_build(&self)
 	}
 
-	// ==================== DNF 合成 ====================
-	//
-	// `+` (union)    : a の clauses + b の clauses (b の lit は index shift)
-	// `*` (intersect): a × b の直積 (各組合せで lit を merge)
-	// `-` (subtract) : a ∩ ¬b。¬b の DNF 化:
-	//                  ¬(c1 ∨ c2 ∨ ...) = ¬c1 ∧ ¬c2 ∧ ...
-	//                  各 ¬ci は c_i の各 lit を否定した OR なので、
-	//                  全 ci から lit を 1 つずつ選び否定した AND の全パターンが
-	//                  ¬b の DNF clause になる。
-
+	// DNF 上で閉じる合成 (規則は notes/20260527 参照)。
 	pub(crate) fn dnf_union(mut a: Self, b: Self) -> Self {
 		let shift = a.solids.len() as i64;
 		a.solids.extend(b.solids);
@@ -116,18 +87,15 @@ impl<S: SolidStruct> Boolean<S> {
 	}
 
 	pub(crate) fn dnf_subtract(a: Self, b: Self) -> Self {
-		// ¬b の DNF を構築する。b の各 clause c_i から lit を 1 つずつ選び否定した
-		// AND の全パターンが ¬b の DNF。
+		// a ∩ ¬b。¬b = 各 b_clause から lit を 1 つずつ選び否定した AND の全パターン。
 		let b_clauses: Vec<Vec<i64>> = b.clauses
 			.split(|&l| l == 0)
 			.filter(|c| !c.is_empty())
 			.map(|c| c.to_vec())
 			.collect();
 		if b_clauses.is_empty() {
-			// b が空 = ⊥ なので ¬b = ⊤、a - b = a (恒等)
-			return a;
+			return a; // b = ⊥ ⇒ ¬b = ⊤ ⇒ a - b = a
 		}
-		// 全パターン: 各 b_clause から lit を 1 つずつ選ぶ
 		let mut accum: Vec<Vec<i64>> = vec![Vec::new()];
 		for clause in &b_clauses {
 			let mut next = Vec::with_capacity(accum.len() * clause.len());
@@ -140,7 +108,6 @@ impl<S: SolidStruct> Boolean<S> {
 			}
 			accum = next;
 		}
-		// neg_b = 上記 accum を clauses 形式に展開した Boolean
 		let mut neg_b_clauses = Vec::new();
 		for cl in accum {
 			neg_b_clauses.extend(cl);
@@ -153,9 +120,8 @@ impl<S: SolidStruct> Boolean<S> {
 
 impl<S: SolidStruct> Clone for Boolean<S> {
 	fn clone(&self) -> Self {
-		// `S::boolean` 経由でバックエンドの shallow copy (TShape identity 保存) を通す。
-		// `self.solids.clone()` だと `S::clone()` (= OCCT では deep_copy) が走り
-		// face id が変わってしまうため使えない。
+		// `S::boolean` 経由の shallow copy で TShape identity を保つ。`self.solids.clone()`
+		// は deep_copy が走り face id が変わるため不可。
 		S::boolean(self.solids.iter(), self.clauses.iter().copied())
 	}
 }
@@ -169,27 +135,17 @@ impl<S: SolidStruct> TryFrom<Boolean<S>> for Vec<S> {
 	}
 }
 
-// Solid は SolidStruct そのものに 1:1 で対応する具象型なので、
-// 「Boolean<Self> から Self へ」の TryFrom は具象型側 (src/occt/solid.rs の
-// Solid impl) で実装する。汎用 `impl<S: SolidStruct> TryFrom<Boolean<S>> for S`
-// は orphan rule 違反 (`S` が外部型かもしれないという扱いで coherence チェックに
-// 引っかかる) ため、`Boolean::build` メソッドだけ提供してユーザーは
-// `(expr).build()?` を使う。
+// 汎用 `impl<S: SolidStruct> TryFrom<Boolean<S>> for S` は orphan rule 違反のため、
+// 「Boolean<Self> → Self」の TryFrom は具象側 (src/occt/solid.rs) に置く。
 
 // ==================== From / 演算子 ====================
 //
-// `Solid` / `&Solid` を `Boolean<S>` に持ち上げる入口が `From`。演算子の中核は
-// `Boolean<S>` を左辺とする impl に集約し、本体は一律 `dnf_*` を 1 回呼ぶだけ
-// (このファイルが演算子の唯一の dnf 呼び出し箇所)。
-//
-// 裸の `Solid`/`&Solid` を左辺とする糖衣は orphan rule のため generic 化できず、
-// `traits::impl_solid_boolean_ops!` マクロで具象 backend 型向けに生成する
-// (invoke は src/occt/solid.rs)。
+// `From` が `Solid`/`&Solid` → `Boolean<S>` の入口。演算子は `Boolean<S>` 左辺に集約
+// (dnf 呼び出しはこのファイルのみ)。裸の Solid/&Solid 左辺の糖衣は orphan rule で
+// generic 化できず traits::impl_solid_boolean_ops! が src/occt/solid.rs で生成する。
 
 impl<S: SolidStruct> From<S> for Boolean<S> {
-	// `S::boolean` は TShape identity を保つ shallow copy。owned 入力でも借用して
-	// 渡すだけで、所有権ベースの metadata move 最適化はしない (generic 契約から
-	// 組む以上の軽微なコスト)。
+	// owned でも借用渡し。metadata move 最適化はしない (generic 契約の軽微なコスト)。
 	fn from(s: S) -> Self {
 		S::boolean(std::iter::once(&s), [1i64, 0])
 	}
@@ -201,9 +157,8 @@ impl<'a, S: SolidStruct> From<&'a S> for Boolean<S> {
 	}
 }
 
-// `Boolean<S>` を左辺とする `+`/`-`/`*`。RHS ∈ {Boolean<S>, S, &S} を `.into()` で
-// `Boolean<S>` に正規化 (Boolean<S> は reflexive `From<T> for T`、S/&S は上記 From)
-// してから dnf 合成する。値 RHS と参照 RHS でライフタイム束縛が異なるので 2 アーム。
+// `Boolean<S>` 左辺の `+`/`-`/`*`。RHS を `.into()` で `Boolean<S>` 化 (reflexive /
+// 上記 From) して dnf 合成。値 RHS と参照 RHS でライフタイムが違うので 2 アーム。
 macro_rules! boolean_lhs_ops {
 	(& $rhs:ty) => {
 		impl<'a, S: SolidStruct> Add<&'a $rhs> for Boolean<S> {
@@ -240,11 +195,7 @@ boolean_lhs_ops!(&S);
 
 // ==================== Sum / Product (集約) ====================
 //
-// `iter.sum::<Boolean<S>>()` / `iter.product::<Boolean<S>>()` で
-// `&S` の iterator を union / intersect する。`+` / `*` 演算子の意味と一致。
-//
-// 空 iterator のとき空の `Boolean` を返す (`build()` で `OneFailed(0)`)。
-// `reduce` を使うので fold の identity を捻り出す必要がない。
+// `&S` 列を union / intersect。空列は空 `Boolean` (`build()` で `OneFailed(0)`)。
 
 impl<'a, S: SolidStruct + 'a> Sum<&'a S> for Boolean<S> {
 	fn sum<I: Iterator<Item = &'a S>>(iter: I) -> Self {
