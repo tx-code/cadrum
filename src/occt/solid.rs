@@ -4,7 +4,7 @@ use super::face::Face;
 use super::ffi;
 use crate::common::boolean::Boolean;
 use crate::common::error::Error;
-use crate::traits::{Compound, ProfileOrient, SolidStruct, Transform};
+use crate::traits::{ProfileOrient, SolidStruct, Transform};
 use glam::DVec3;
 use std::sync::{Mutex, OnceLock};
 
@@ -518,6 +518,64 @@ impl SolidStruct for Solid {
 	fn mesh<'a>(solids: impl IntoIterator<Item = &'a Self>, tolerance: f64) -> Result<crate::common::mesh::Mesh, Error> where Self: 'a {
 		super::io::mesh(solids, tolerance)
 	}
+
+	// ==================== Queries ====================
+
+	fn volume(&self) -> f64 {
+		ffi::shape_volume(&self.inner)
+	}
+
+	fn area(&self) -> f64 {
+		ffi::shape_surface_area(&self.inner)
+	}
+
+	fn center(&self) -> DVec3 {
+		let (mut x, mut y, mut z) = (0.0_f64, 0.0_f64, 0.0_f64);
+		ffi::shape_center_of_mass(&self.inner, &mut x, &mut y, &mut z);
+		DVec3::new(x, y, z)
+	}
+
+	fn inertia(&self) -> glam::DMat3 {
+		let (mut m00, mut m01, mut m02) = (0.0_f64, 0.0_f64, 0.0_f64);
+		let (mut m10, mut m11, mut m12) = (0.0_f64, 0.0_f64, 0.0_f64);
+		let (mut m20, mut m21, mut m22) = (0.0_f64, 0.0_f64, 0.0_f64);
+		ffi::shape_inertia_tensor(&self.inner,
+			&mut m00, &mut m01, &mut m02,
+			&mut m10, &mut m11, &mut m12,
+			&mut m20, &mut m21, &mut m22);
+		// OCCT fills row-major; DMat3::from_cols_array is column-major so
+		// transpose when handing the components over.
+		glam::DMat3::from_cols_array(&[
+			m00, m10, m20,
+			m01, m11, m21,
+			m02, m12, m22,
+		])
+	}
+
+	fn contains(&self, point: DVec3) -> bool {
+		ffi::shape_contains_point(&self.inner, point.x, point.y, point.z)
+	}
+
+	fn bounding_box(&self) -> [DVec3; 2] {
+		let (mut xmin, mut ymin, mut zmin) = (0.0_f64, 0.0_f64, 0.0_f64);
+		let (mut xmax, mut ymax, mut zmax) = (0.0_f64, 0.0_f64, 0.0_f64);
+		ffi::shape_bounding_box(&self.inner, &mut xmin, &mut ymin, &mut zmin, &mut xmax, &mut ymax, &mut zmax);
+		[DVec3::new(xmin, ymin, zmin), DVec3::new(xmax, ymax, zmax)]
+	}
+
+	// ==================== Color ====================
+
+	#[cfg(feature = "color")]
+	fn color(self, color: impl Into<crate::common::color::Color>) -> Self {
+		let c = color.into();
+		let colormap = ffi::shape_faces(&self.inner).iter().map(|f| (ffi::face_tshape_id(f), c)).collect();
+		Self::new(self.inner, colormap, self.history)
+	}
+
+	#[cfg(feature = "color")]
+	fn color_clear(self) -> Self {
+		Self::new(self.inner, std::collections::HashMap::new(), self.history)
+	}
 }
 
 // ==================== impl Transform for Solid ====================
@@ -582,81 +640,6 @@ impl Transform for Solid {
 			colormap,
 			Default::default(),
 		)
-	}
-}
-
-// ==================== impl Compound for Solid ====================
-//
-// Solid-specific per-element ops (queries / color / boolean wrappers / clean).
-// `Vec<Solid>` and `[Solid; N]` impls live in src/traits.rs and delegate to this one.
-impl Compound for Solid {
-	type Elem = Solid;
-
-	// ==================== Queries ====================
-
-	fn volume(&self) -> f64 {
-		ffi::shape_volume(&self.inner)
-	}
-
-	fn area(&self) -> f64 {
-		ffi::shape_surface_area(&self.inner)
-	}
-
-	fn center(&self) -> DVec3 {
-		let (mut x, mut y, mut z) = (0.0_f64, 0.0_f64, 0.0_f64);
-		ffi::shape_center_of_mass(&self.inner, &mut x, &mut y, &mut z);
-		DVec3::new(x, y, z)
-	}
-
-	fn inertia(&self) -> glam::DMat3 {
-		let (mut m00, mut m01, mut m02) = (0.0_f64, 0.0_f64, 0.0_f64);
-		let (mut m10, mut m11, mut m12) = (0.0_f64, 0.0_f64, 0.0_f64);
-		let (mut m20, mut m21, mut m22) = (0.0_f64, 0.0_f64, 0.0_f64);
-		ffi::shape_inertia_tensor(&self.inner,
-			&mut m00, &mut m01, &mut m02,
-			&mut m10, &mut m11, &mut m12,
-			&mut m20, &mut m21, &mut m22);
-		// OCCT fills row-major; DMat3::from_cols_array is column-major so
-		// transpose when handing the components over.
-		glam::DMat3::from_cols_array(&[
-			m00, m10, m20,
-			m01, m11, m21,
-			m02, m12, m22,
-		])
-	}
-
-	fn contains(&self, point: DVec3) -> bool {
-		ffi::shape_contains_point(&self.inner, point.x, point.y, point.z)
-	}
-
-	fn bounding_box(&self) -> [DVec3; 2] {
-		let (mut xmin, mut ymin, mut zmin) = (0.0_f64, 0.0_f64, 0.0_f64);
-		let (mut xmax, mut ymax, mut zmax) = (0.0_f64, 0.0_f64, 0.0_f64);
-		ffi::shape_bounding_box(&self.inner, &mut xmin, &mut ymin, &mut zmin, &mut xmax, &mut ymax, &mut zmax);
-		[DVec3::new(xmin, ymin, zmin), DVec3::new(xmax, ymax, zmax)]
-	}
-
-	// ==================== Color ====================
-
-	#[cfg(feature = "color")]
-	fn color(self, color: impl Into<crate::common::color::Color>) -> Self {
-		let c = color.into();
-		let colormap = ffi::shape_faces(&self.inner).iter().map(|f| (ffi::face_tshape_id(f), c)).collect();
-		Self::new(self.inner, colormap, self.history)
-	}
-
-	#[cfg(feature = "color")]
-	fn color_clear(self) -> Self {
-		Self::new(self.inner, std::collections::HashMap::new(), self.history)
-	}
-
-	fn iter_elem(&self) -> impl Iterator<Item = &Self::Elem> + '_ {
-		panic!("Cannot iter_elem on Solid, because Solid is not Compound");
-		#[allow(unreachable_code)] std::iter::empty()
-	}
-
-	fn map_elem(self, _f: impl FnMut(Self::Elem) -> Self::Elem) -> Self {
-		panic!("Cannot map_elem on Solid, because Solid is not Compound")
 	}
 }
 

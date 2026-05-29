@@ -1,17 +1,28 @@
-//! Integration tests for `Edge` query APIs — currently only `Wire::project`.
+//! Integration tests for `Edge` query APIs — `EdgeStruct::project` and the
+//! `wire_project` iterator idiom for an ordered edge list.
 //!
 //! Covers single `Edge` and multi-edge wire (`Vec<Edge>`) paths across a
 //! mix of curve kinds (line, circle, polygon, B-spline). The expected
 //! closest point is computed analytically from the curve definition and
 //! compared to the FFI result.
 
-use cadrum::{BSplineEnd, Edge, Wire};
+use cadrum::{BSplineEnd, Edge};
 use glam::DVec3;
 
 const TOL: f64 = 1e-6;
 
 fn approx_eq(a: DVec3, b: DVec3, tol: f64) -> bool {
 	(a - b).length() < tol
+}
+
+/// Project a point onto a wire (= ordered edge list) by taking the nearest
+/// per-edge projection. This is the iterator idiom that replaces the removed
+/// `Wire::project` collection method.
+fn wire_project(wire: &[Edge], p: DVec3) -> (DVec3, DVec3) {
+	wire.iter()
+		.map(|e| e.project(p))
+		.min_by(|(a, _), (b, _)| (*a - p).length_squared().partial_cmp(&(*b - p).length_squared()).unwrap())
+		.unwrap_or((DVec3::ZERO, DVec3::ZERO))
 }
 
 #[test]
@@ -47,10 +58,10 @@ fn project_on_polygon_picks_nearest_edge() {
 		DVec3::new(1.0, -1.0, 0.0),
 	].iter()).unwrap();
 	// (2, 0, 0) is closest to the right edge x=1, y∈[-1,1] -> (1, 0, 0).
-	let (cp, _) = square.project(DVec3::new(2.0, 0.0, 0.0));
+	let (cp, _) = wire_project(&square, DVec3::new(2.0, 0.0, 0.0));
 	assert!(approx_eq(cp, DVec3::new(1.0, 0.0, 0.0), TOL), "cp={cp:?}");
 	// (-2, -3, 0) is closest to the corner (-1, -1, 0).
-	let (cp2, _) = square.project(DVec3::new(-2.0, -3.0, 0.0));
+	let (cp2, _) = wire_project(&square, DVec3::new(-2.0, -3.0, 0.0));
 	assert!(approx_eq(cp2, DVec3::new(-1.0, -1.0, 0.0), TOL), "cp2={cp2:?}");
 }
 
@@ -80,11 +91,10 @@ fn project_on_bspline_converges_to_interpolant() {
 
 #[test]
 fn project_empty_wire_returns_zero() {
-	// Matches the silent-zero convention of `start_point` / `start_tangent`
-	// on empty `Vec<Edge>` — degenerate inputs yield (ZERO, ZERO) rather
-	// than an error, keeping the Wire API uniformly total.
+	// An empty wire has no edges; the `wire_project` idiom falls back to
+	// (ZERO, ZERO) via `unwrap_or` rather than panicking.
 	let empty: Vec<Edge> = Vec::new();
-	let (cp, tg) = empty.project(DVec3::ONE);
+	let (cp, tg) = wire_project(&empty, DVec3::ONE);
 	assert_eq!(cp, DVec3::ZERO);
 	assert_eq!(tg, DVec3::ZERO);
 }
