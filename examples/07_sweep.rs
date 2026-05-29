@@ -19,7 +19,7 @@
 //!   toward a parallel auxiliary spine. Arbitrary twist control — e.g. a
 //!   helical `aux_spine` on a straight `spine` produces a twisted ribbon.
 
-use cadrum::{DVec3, Edge, Error, ProfileOrient, Solid, Wire};
+use cadrum::{DVec3, Edge, Error, ProfileOrient, Solid};
 
 // ==================== Component 1: M2 ISO screw ====================
 
@@ -39,7 +39,7 @@ fn build_m2_screw() -> Result<Solid, Error> {
 	let profile = Edge::polygon(&[DVec3::new(0.0, -h_pitch / 2.0, 0.0), DVec3::new(r_delta, 0.0, 0.0), DVec3::new(0.0, h_pitch / 2.0, 0.0)])?;
 
 	// Align profile +Z with the helix start tangent, then translate to the start point.
-	let profile = profile.align_z(helix.start_tangent(), helix.start_point()).translate(helix.start_point());
+	let profile: Vec<Edge> = profile.into_iter().map(|e| e.align_z(helix.start_tangent(), helix.start_point()).translate(helix.start_point())).collect();
 
 	// Sweep along the helix. Up(+Z) ≡ Torsion for a helix and yields a correct thread.
 	let thread = Solid::sweep(&profile, &[helix], ProfileOrient::Up(DVec3::Z))?;

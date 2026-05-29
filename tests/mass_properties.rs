@@ -5,7 +5,7 @@
 //! aggregation over collections a straight matrix sum (parallel-axis theorem
 //! is already folded in).
 
-use cadrum::{Compound, Solid};
+use cadrum::Solid;
 use glam::DVec3;
 
 const EPS: f64 = 1e-6;
@@ -78,45 +78,43 @@ fn test_vec_center_is_volume_weighted_average() {
 	];
 
 	let expected_center = DVec3::new((a / 2.0 + (a / 2.0 + offset)) / 2.0, a / 2.0, a / 2.0);
+	// Aggregate manually with iterator idioms: volume-weighted center plus
+	// summed volume / area (the library no longer provides collection methods).
+	let total_vol: f64 = cubes.iter().map(|c| c.volume()).sum();
+	let center = cubes.iter().map(|c| c.center() * c.volume()).sum::<DVec3>() / total_vol;
 	assert!(
-		(cubes.center() - expected_center).length() < EPS,
-		"aggregate center = {:?}, expected {expected_center:?}", cubes.center()
+		(center - expected_center).length() < EPS,
+		"aggregate center = {center:?}, expected {expected_center:?}"
 	);
-	assert!((cubes.volume() - 2.0 * a.powi(3)).abs() < EPS);
-	assert!((cubes.area() - 2.0 * 6.0 * a.powi(2)).abs() < EPS);
+	assert!((total_vol - 2.0 * a.powi(3)).abs() < EPS);
+	assert!((cubes.iter().map(|c| c.area()).sum::<f64>() - 2.0 * 6.0 * a.powi(2)).abs() < EPS);
 }
 
-/// World-origin inertia is additive: `inertia(Vec)` equals the sum of
-/// per-element `inertia()`. This is tautological for the current implementation
-/// but guards against someone "fixing" the aggregator to re-center to the
-/// collection's COM (which would break parallel-axis additivity).
+/// World-origin inertia is additive across elements: summing the per-element
+/// tensors of two identical co-located cubes gives exactly twice a single
+/// cube's tensor. Confirms both the single-element `inertia()` and that the
+/// `map(..).fold(DMat3::ZERO, +)` idiom is the correct way to aggregate.
 #[test]
-fn test_vec_inertia_equals_sum_of_elements() {
-	let cubes = vec![
-		Solid::cube(3.0, 3.0, 3.0),
-		Solid::cube(2.0, 2.0, 2.0).translate(DVec3::new(5.0, 0.0, 0.0)),
-		Solid::cube(4.0, 4.0, 4.0).translate(DVec3::new(0.0, 7.0, 0.0)),
-	];
-
-	let expected = cubes.iter().map(|c| c.inertia()).fold(glam::DMat3::ZERO, |a, b| a + b);
-	let actual = cubes.inertia();
+fn test_inertia_is_additive_over_elements() {
+	let single = Solid::cube(3.0, 3.0, 3.0).inertia();
+	let cubes = vec![Solid::cube(3.0, 3.0, 3.0), Solid::cube(3.0, 3.0, 3.0)];
+	let summed = cubes.iter().map(|c| c.inertia()).fold(glam::DMat3::ZERO, |a, b| a + b);
 	for col in 0..3 {
 		for row in 0..3 {
 			assert!(
-				(actual.col(col)[row] - expected.col(col)[row]).abs() < 1e-9,
-				"inertia[{row}][{col}] = {}, expected {}", actual.col(col)[row], expected.col(col)[row]
+				(summed.col(col)[row] - 2.0 * single.col(col)[row]).abs() < 1e-9,
+				"summed inertia[{row}][{col}] = {}, expected {}", summed.col(col)[row], 2.0 * single.col(col)[row]
 			);
 		}
 	}
 }
 
-/// Empty Vec returns zero/identity values without panicking. Exercises the
-/// zero-volume guard in `center()`.
+/// Aggregating over an empty collection with iterator idioms yields the
+/// natural identity values (sum = 0, fold = ZERO) without panicking.
 #[test]
 fn test_empty_vec_queries_do_not_panic() {
 	let empty: Vec<Solid> = vec![];
-	assert_eq!(empty.volume(), 0.0);
-	assert_eq!(empty.area(), 0.0);
-	assert_eq!(empty.center(), DVec3::ZERO);
-	assert_eq!(empty.inertia(), glam::DMat3::ZERO);
+	assert_eq!(empty.iter().map(|s| s.volume()).sum::<f64>(), 0.0);
+	assert_eq!(empty.iter().map(|s| s.area()).sum::<f64>(), 0.0);
+	assert_eq!(empty.iter().map(|s| s.inertia()).fold(glam::DMat3::ZERO, |a, b| a + b), glam::DMat3::ZERO);
 }

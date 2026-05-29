@@ -38,10 +38,12 @@ geometry actually appears.
   input. Operations are inherent methods on the shape types, so
   `Solid::cube(...).rotate_z(0.5).translate(DVec3::X * 10.0)` chains like
   any value-returning Rust API.
-- **Collections are first-class.** `Vec<Solid>` and `[Solid; N]` carry the
-  same transform, query, and boolean methods as a single `Solid` via the
-  `Compound` trait; the wire / edge-list pair has the parallel `Wire`
-  trait.
+- **Single-type surface; collections via iterators.** Every operation lives
+  on the concrete shape types (`Solid`, `Edge`). A collection is just a
+  `Vec<Solid>` / `[Solid; N]` — transform or aggregate it with ordinary
+  iterator idioms (`parts.iter().map(|s| s.translate(v)).collect()`,
+  `parts.iter().map(|s| s.volume()).sum::<f64>()`). Booleans, sweep, loft,
+  extrude and I/O take any `IntoIterator<Item = &Solid>` / `&Edge` directly.
 
 ## Introduction
 
@@ -66,7 +68,7 @@ exposes through `Solid::mesh` when an STL export or SVG render is required.
 | **Surfacing** | `Solid::extrude`, `Solid::sweep`, `Solid::loft`, `Solid::bspline` |
 | **Editing** | `Solid::shell`, `Solid::fillet_edges`, `Solid::chamfer_edges`, `Solid::clean` |
 | **Booleans** | `Solid::boolean_union`, `Solid::boolean_subtract`, `Solid::boolean_intersect` |
-| **Transforms** *(shared by `Solid` / `Edge` / `Compound` / `Wire`)* | `translate`, `rotate`, `rotate_x` / `_y` / `_z`, `scale`, `mirror`, `align_x` / `_y` / `_z` |
+| **Transforms** *(inherent on `Solid` / `Edge`; apply element-wise to collections via `map`)* | `translate`, `rotate`, `rotate_x` / `_y` / `_z`, `scale`, `mirror`, `align_x` / `_y` / `_z` |
 | **Queries** | `Solid::volume`, `Solid::area`, `Solid::center`, `Solid::inertia`, `Solid::bounding_box`, `Solid::contains` |
 | **Topology** | `Solid::iter_face`, `Solid::iter_edge`, `Face::iter_edge`, `Face::project`, `Edge::project` |
 | **Identity / history** | `Solid::id`, `Face::id`, `Edge::id`, `Solid::iter_history` |
@@ -169,7 +171,7 @@ cargo run --example 02_write_read
 ```rust,no_run
 //! Read and write: chain STEP, BRep text, and BRep binary round-trips with progressive rotation.
 
-use cadrum::{Compound, DVec3, Solid};
+use cadrum::{DVec3, Solid};
 use std::f64::consts::FRAC_PI_8;
 
 fn main() -> Result<(), cadrum::Error> {
@@ -185,17 +187,17 @@ fn main() -> Result<(), cadrum::Error> {
     )?;
 
     // 1. STEP round-trip: rotate 30° → write → read
-    let a_written = original.clone().rotate_x(FRAC_PI_8);
+    let a_written: Vec<Solid> = original.clone().into_iter().map(|s| s.rotate_x(FRAC_PI_8)).collect();
     Solid::write_step(&a_written, &mut std::fs::File::create(&step_path).expect("create file"))?;
     let a = Solid::read_step(&mut std::fs::File::open(&step_path).expect("open file"))?;
 
     // 2. BRep text round-trip: rotate another 30° → write → read
-    let b_written = a.clone().rotate_x(FRAC_PI_8);
+    let b_written: Vec<Solid> = a.clone().into_iter().map(|s| s.rotate_x(FRAC_PI_8)).collect();
     Solid::write_brep_text(&b_written, &mut std::fs::File::create(&text_path).expect("create file"))?;
     let b = Solid::read_brep_text(&mut std::fs::File::open(&text_path).expect("open file"))?;
 
     // 3. BRep binary round-trip: rotate another 30° → write → read
-    let c_written = b.clone().rotate_x(FRAC_PI_8);
+    let c_written: Vec<Solid> = b.clone().into_iter().map(|s| s.rotate_x(FRAC_PI_8)).collect();
     Solid::write_brep_binary(&c_written, &mut std::fs::File::create(&brep_path).expect("create file"))?;
     let c = Solid::read_brep_binary(&mut std::fs::File::open(&brep_path).expect("open file"))?;
 
@@ -204,7 +206,7 @@ fn main() -> Result<(), cadrum::Error> {
     let spacing = (max - min).length() * 1.5;
     let all: Vec<Solid> = [original, a, b, c].into_iter()
         .enumerate()
-        .flat_map(|(i, solids)| solids.translate(DVec3::X * spacing * i as f64))
+        .flat_map(|(i, solids)| solids.into_iter().map(move |s| s.translate(DVec3::X * spacing * i as f64)))
         .collect();
 
     let scene = Solid::mesh(&all, 0.5)?.scene(DVec3::new(1.0, 1.0, 2.0), DVec3::Z, true, false);
@@ -564,7 +566,7 @@ cargo run --example 07_sweep
 //!   toward a parallel auxiliary spine. Arbitrary twist control — e.g. a
 //!   helical `aux_spine` on a straight `spine` produces a twisted ribbon.
 
-use cadrum::{DVec3, Edge, Error, ProfileOrient, Solid, Wire};
+use cadrum::{DVec3, Edge, Error, ProfileOrient, Solid};
 
 // ==================== Component 1: M2 ISO screw ====================
 
@@ -584,7 +586,7 @@ fn build_m2_screw() -> Result<Solid, Error> {
 	let profile = Edge::polygon(&[DVec3::new(0.0, -h_pitch / 2.0, 0.0), DVec3::new(r_delta, 0.0, 0.0), DVec3::new(0.0, h_pitch / 2.0, 0.0)])?;
 
 	// Align profile +Z with the helix start tangent, then translate to the start point.
-	let profile = profile.align_z(helix.start_tangent(), helix.start_point()).translate(helix.start_point());
+	let profile: Vec<Edge> = profile.into_iter().map(|e| e.align_z(helix.start_tangent(), helix.start_point()).translate(helix.start_point())).collect();
 
 	// Sweep along the helix. Up(+Z) ≡ Torsion for a helix and yields a correct thread.
 	let thread = Solid::sweep(&profile, &[helix], ProfileOrient::Up(DVec3::Z))?;
@@ -1010,20 +1012,17 @@ fn main() -> Result<(), cadrum::Error> {
 
 ## The Type Map
 
-Three concrete shape types and two trait umbrellas form the whole public
-surface:
+Three concrete shape types form the whole public surface — there are no
+collection wrapper traits:
 
 ```text
     Edge  ── single 3D curve         ┐
     Face  ── trimmed 3D surface      │ concrete BRep handles
     Solid ── connected closed body   ┘
-
-    Wire     ── trait carrying methods on Edge / Vec<Edge> / [Edge; N]
-    Compound ── trait carrying methods on Solid / Vec<Solid> / [Solid; N]
 ```
 
-On a single `Solid` or single `Edge`, every method is reachable inherently —
-no trait import needed:
+Every method is inherent on the concrete type — no trait import is ever
+needed:
 
 ```rust,no_run
 # use cadrum::{DVec3, Solid};
@@ -1031,56 +1030,45 @@ let s = Solid::cube(1.0, 1.0, 1.0).rotate_z(0.5).translate(DVec3::X);
 let v = s.volume();
 ```
 
-On a `Vec<Solid>` or `[Solid; N]`, the same operations live behind the
-`Compound` trait. A single `use cadrum::Compound;` brings them into scope
-on the collection — including the spatial transforms, which on collections
-distribute element-wise:
+A collection of shapes is just a `Vec<Solid>` / `[Solid; N]` (or `Vec<Edge>`
+for a wire). cadrum does not special-case collections with a trait; you
+transform and aggregate them with ordinary iterator idioms:
 
 ```rust,no_run
-use cadrum::{Compound, DVec3, Solid};
+use cadrum::{DVec3, Solid};
 
 let parts: Vec<Solid> = vec![
     Solid::cube(1.0, 1.0, 1.0),
     Solid::sphere(1.0),
 ];
-let shifted = parts.translate(DVec3::X * 5.0);
-let total   = shifted.volume();        // Σ per-element volumes
-let bbox    = shifted.bounding_box();  // union AABB
+// element-wise transform
+let shifted: Vec<Solid> = parts.into_iter().map(|s| s.translate(DVec3::X * 5.0)).collect();
+// aggregate query — Σ per-element volumes
+let total: f64 = shifted.iter().map(|s| s.volume()).sum();
 ```
 
-`Vec<Edge>` plays the equivalent role for wires (open or closed polylines
-made of edges) under `Wire`. There is no separate `Wire` type — an ordered
-`Vec<Edge>` *is* a wire, and sweep / loft / extrude all take any
-`IntoIterator<Item = &Edge>`.
+An ordered `Vec<Edge>` *is* a wire (open or closed polyline); sweep / loft /
+extrude all take any `IntoIterator<Item = &Edge>`.
 
-### Spatial transforms across the whole hierarchy
+### Spatial transforms
 
 The transform family — `translate`, `rotate`, `rotate_x` / `_y` / `_z`,
-`scale`, `mirror`, `align_x` / `_y` / `_z` — is implemented identically on
-every shape and every collection. The same method name and signature works
-on:
-
-- a single `Solid` — `cube.rotate_z(angle)`
-- a single `Edge` — `circle.translate(offset)`
-- `Vec<Solid>` / `[Solid; N]` via `Compound` — element-wise
-- `Vec<Edge>` / `[Edge; N]` via `Wire` — element-wise
+`scale`, `mirror`, `align_x` / `_y` / `_z` — is an inherent method on each
+single shape (`Solid`, `Edge`). Apply it to a collection element-wise with
+`map`:
 
 ```rust,no_run
-use cadrum::{Compound, DVec3, Edge, Solid, Wire};
+use cadrum::{DVec3, Edge, Solid};
 use std::f64::consts::FRAC_PI_4;
 
-let s: Solid          = Solid::sphere(1.0).translate(DVec3::X);
-let e: Edge           = Edge::circle(1.0, DVec3::Z)?.rotate_x(FRAC_PI_4);
-let v_s: Vec<Solid>   = vec![Solid::cube(1.0, 1.0, 1.0)].translate(DVec3::Y);
-let v_e: Vec<Edge>    = Edge::polygon(&[
+let s: Solid        = Solid::sphere(1.0).translate(DVec3::X);
+let e: Edge         = Edge::circle(1.0, DVec3::Z)?.rotate_x(FRAC_PI_4);
+let v_s: Vec<Solid> = vec![Solid::cube(1.0, 1.0, 1.0)].into_iter().map(|s| s.translate(DVec3::Y)).collect();
+let v_e: Vec<Edge>  = Edge::polygon(&[
     DVec3::ZERO, DVec3::X, DVec3::X + DVec3::Y, DVec3::Y,
-])?.rotate_z(FRAC_PI_4);
+])?.into_iter().map(|e| e.rotate_z(FRAC_PI_4)).collect();
 # Ok::<(), cadrum::Error>(())
 ```
-
-On `Solid` / `Edge` themselves the methods are inherent (no import
-required); on collections `use cadrum::Compound;` / `use cadrum::Wire;`
-brings them into scope.
 
 ## Working with Wires
 
@@ -1137,7 +1125,7 @@ face in the result remembers which face of which input it came from. That
 makes face selectors stable across boolean stages:
 
 ```rust,no_run
-use cadrum::{Compound, DVec3, Solid};
+use cadrum::{DVec3, Solid};
 
 let block = Solid::cube(20.0, 20.0, 20.0);
 let hole  = Solid::cylinder(8.0, DVec3::Z, 30.0)

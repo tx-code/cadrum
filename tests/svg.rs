@@ -1,4 +1,4 @@
-use cadrum::{Compound, Solid};
+use cadrum::{Solid};
 use glam::DVec3;
 
 fn dvec3(x: f64, y: f64, z: f64) -> DVec3 {
@@ -80,7 +80,7 @@ fn test_svg_rotated_sphere_face_count_stable() {
 	let svg_a = svg_string(&shape, DVec3::X, 0.1);
 	let count_a = count_polygons(&svg_a);
 
-	let rotated = shape.rotate_y(std::f64::consts::PI);
+	let rotated = shape.map(|s| s.rotate_y(std::f64::consts::PI));
 	let svg_b = svg_string(&rotated, DVec3::X, 0.1);
 	let count_b = count_polygons(&svg_b);
 

@@ -1,6 +1,6 @@
 //! Read and write: chain STEP, BRep text, and BRep binary round-trips with progressive rotation.
 
-use cadrum::{Compound, DVec3, Solid};
+use cadrum::{DVec3, Solid};
 use std::f64::consts::FRAC_PI_8;
 
 fn main() -> Result<(), cadrum::Error> {
@@ -16,17 +16,17 @@ fn main() -> Result<(), cadrum::Error> {
     )?;
 
     // 1. STEP round-trip: rotate 30° → write → read
-    let a_written = original.clone().rotate_x(FRAC_PI_8);
+    let a_written: Vec<Solid> = original.clone().into_iter().map(|s| s.rotate_x(FRAC_PI_8)).collect();
     Solid::write_step(&a_written, &mut std::fs::File::create(&step_path).expect("create file"))?;
     let a = Solid::read_step(&mut std::fs::File::open(&step_path).expect("open file"))?;
 
     // 2. BRep text round-trip: rotate another 30° → write → read
-    let b_written = a.clone().rotate_x(FRAC_PI_8);
+    let b_written: Vec<Solid> = a.clone().into_iter().map(|s| s.rotate_x(FRAC_PI_8)).collect();
     Solid::write_brep_text(&b_written, &mut std::fs::File::create(&text_path).expect("create file"))?;
     let b = Solid::read_brep_text(&mut std::fs::File::open(&text_path).expect("open file"))?;
 
     // 3. BRep binary round-trip: rotate another 30° → write → read
-    let c_written = b.clone().rotate_x(FRAC_PI_8);
+    let c_written: Vec<Solid> = b.clone().into_iter().map(|s| s.rotate_x(FRAC_PI_8)).collect();
     Solid::write_brep_binary(&c_written, &mut std::fs::File::create(&brep_path).expect("create file"))?;
     let c = Solid::read_brep_binary(&mut std::fs::File::open(&brep_path).expect("open file"))?;
 
@@ -35,7 +35,7 @@ fn main() -> Result<(), cadrum::Error> {
     let spacing = (max - min).length() * 1.5;
     let all: Vec<Solid> = [original, a, b, c].into_iter()
         .enumerate()
-        .flat_map(|(i, solids)| solids.translate(DVec3::X * spacing * i as f64))
+        .flat_map(|(i, solids)| solids.into_iter().map(move |s| s.translate(DVec3::X * spacing * i as f64)))
         .collect();
 
     let scene = Solid::mesh(&all, 0.5)?.scene(DVec3::new(1.0, 1.0, 2.0), DVec3::Z, true, false);
