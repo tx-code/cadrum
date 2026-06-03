@@ -144,10 +144,10 @@ fn main() -> Result<(), cadrum::Error> {
 
     Solid::write_step(&solids, &mut std::fs::File::create(format!("{example_name}.step")).unwrap())?;
 
-    let scene = Solid::mesh(&solids, Default::default())?.scene(DVec3::ONE, DVec3::Z, true, false);
+    let mesh = Solid::mesh(&solids, Default::default())?;
+    let scene = mesh.scene(Default::default());
     scene.write_svg(&mut std::fs::File::create(format!("{example_name}.svg")).unwrap())?;
     scene.write_png([640, 640], &mut std::fs::File::create(format!("{example_name}.png")).unwrap())?;
-    let mesh = Solid::mesh(&solids, Default::default())?;
     mesh.write_stl(&mut std::fs::File::create(format!("{example_name}.stl")).unwrap())?;
     mesh.write_gltf_binary(&mut std::fs::File::create(format!("{example_name}.glb")).unwrap())?;
 
@@ -210,12 +210,13 @@ fn main() -> Result<(), cadrum::Error> {
         .flat_map(|(i, solids)| solids.into_iter().map(move |s| s.translate(DVec3::X * spacing * i as f64)))
         .collect();
 
-    let scene = Solid::mesh(&all, Default::default())?.scene(DVec3::new(1.0, 1.0, 2.0), DVec3::Z, true, false);
+    let mesh = Solid::mesh(&all, Default::default())?;
+    let scene = mesh.scene(cadrum::SceneOption { view: DVec3::new(1.0, 1.0, 2.0), ..Default::default() });
     scene.write_svg(&mut std::fs::File::create(format!("{example_name}.svg")).unwrap())?;
     scene.write_png([640, 640], &mut std::fs::File::create(format!("{example_name}.png")).unwrap())?;
 
-    Solid::mesh(&all, Default::default())?.write_stl(&mut std::fs::File::create(format!("{example_name}.stl")).unwrap())?;
-    Solid::mesh(&all, Default::default())?.write_gltf_binary(&mut std::fs::File::create(format!("{example_name}.glb")).unwrap())?;
+    mesh.write_stl(&mut std::fs::File::create(format!("{example_name}.stl")).unwrap())?;
+    mesh.write_gltf_binary(&mut std::fs::File::create(format!("{example_name}.glb")).unwrap())?;
 
     // 5. Print summary
     let stl_path = format!("{example_name}.stl");
@@ -279,10 +280,10 @@ fn main() -> Result<(), cadrum::Error> {
 
     Solid::write_step(&solids, &mut std::fs::File::create(format!("{example_name}.step")).unwrap())?;
 
-    let scene = Solid::mesh(&solids, Default::default())?.scene(DVec3::ONE, DVec3::Z, true, false);
+    let mesh = Solid::mesh(&solids, Default::default())?;
+    let scene = mesh.scene(Default::default());
     scene.write_svg(&mut std::fs::File::create(format!("{example_name}.svg")).unwrap())?;
     scene.write_png([640, 640], &mut std::fs::File::create(format!("{example_name}.png")).unwrap())?;
-    let mesh = Solid::mesh(&solids, Default::default())?;
     mesh.write_stl(&mut std::fs::File::create(format!("{example_name}.stl")).unwrap())?;
     mesh.write_gltf_binary(&mut std::fs::File::create(format!("{example_name}.glb")).unwrap())?;
 
@@ -350,10 +351,10 @@ fn main() -> Result<(), cadrum::Error> {
 
     Solid::write_step(&shapes, &mut std::fs::File::create(format!("{example_name}.step")).unwrap())?;
 
-    let scene = Solid::mesh(&shapes, Default::default())?.scene(DVec3::new(1.0, 1.0, 2.0), DVec3::Z, true, false);
+    let mesh = Solid::mesh(&shapes, Default::default())?;
+    let scene = mesh.scene(cadrum::SceneOption { view: DVec3::new(1.0, 1.0, 2.0), ..Default::default() });
     scene.write_svg(&mut std::fs::File::create(format!("{example_name}.svg")).unwrap())?;
     scene.write_png([640, 640], &mut std::fs::File::create(format!("{example_name}.png")).unwrap())?;
-    let mesh = Solid::mesh(&shapes, Default::default())?;
     mesh.write_stl(&mut std::fs::File::create(format!("{example_name}.stl")).unwrap())?;
     mesh.write_gltf_binary(&mut std::fs::File::create(format!("{example_name}.glb")).unwrap())?;
 
@@ -445,10 +446,10 @@ fn main() -> Result<(), Error> {
 
 	Solid::write_step(&result, &mut std::fs::File::create(format!("{example_name}.step")).unwrap())?;
 
-	let scene = Solid::mesh(&result, Default::default())?.scene(DVec3::ONE, DVec3::Z, true, false);
+	let mesh = Solid::mesh(&result, Default::default())?;
+	let scene = mesh.scene(Default::default());
 	scene.write_svg(&mut std::fs::File::create(format!("{example_name}.svg")).unwrap())?;
 	scene.write_png([640, 640], &mut std::fs::File::create(format!("{example_name}.png")).unwrap())?;
-	let mesh = Solid::mesh(&result, Default::default())?;
 	mesh.write_stl(&mut std::fs::File::create(format!("{example_name}.stl")).unwrap())?;
 	mesh.write_gltf_binary(&mut std::fs::File::create(format!("{example_name}.glb")).unwrap())?;
 
@@ -522,10 +523,10 @@ fn main() -> Result<(), Error> {
 
 	Solid::write_step(&result, &mut std::fs::File::create(format!("{example_name}.step")).unwrap())?;
 
-	let scene = Solid::mesh(&result, Default::default())?.scene(DVec3::ONE, DVec3::Z, true, false);
+	let mesh = Solid::mesh(&result, Default::default())?;
+	let scene = mesh.scene(Default::default());
 	scene.write_svg(&mut std::fs::File::create(format!("{example_name}.svg")).unwrap())?;
 	scene.write_png([640, 640], &mut std::fs::File::create(format!("{example_name}.png")).unwrap())?;
-	let mesh = Solid::mesh(&result, Default::default())?;
 	mesh.write_stl(&mut std::fs::File::create(format!("{example_name}.stl")).unwrap())?;
 	mesh.write_gltf_binary(&mut std::fs::File::create(format!("{example_name}.glb")).unwrap())?;
 
@@ -673,10 +674,10 @@ fn main() -> Result<(), Error> {
 	Solid::write_step(&all, &mut std::fs::File::create(format!("{example_name}.step")).unwrap())?;
 
 	// Helical threads have dense hidden lines that clutter the output; disable them.
-	let scene = Solid::mesh(&all, Default::default())?.scene(DVec3::new(1.0, 1.0, -1.0), DVec3::Z, false, false);
+	let mesh = Solid::mesh(&all, Default::default())?;
+	let scene = mesh.scene(cadrum::SceneOption { view: DVec3::new(1.0, 1.0, -1.0), hidden_edges: false, ..Default::default() });
 	scene.write_svg(&mut std::fs::File::create(format!("{example_name}.svg")).unwrap())?;
 	scene.write_png([640, 640], &mut std::fs::File::create(format!("{example_name}.png")).unwrap())?;
-	let mesh = Solid::mesh(&all, Default::default())?;
 	mesh.write_stl(&mut std::fs::File::create(format!("{example_name}.stl")).unwrap())?;
 	mesh.write_gltf_binary(&mut std::fs::File::create(format!("{example_name}.glb")).unwrap())?;
 
@@ -753,10 +754,10 @@ fn main() -> Result<(), Error> {
 
 	// Isometric view from (1, 1, 2) with shading so the cavity depth reads
 	// naturally.
-	let scene = Solid::mesh(&result, Default::default())?.scene(DVec3::new(1.0, 1.0, 2.0), DVec3::Z, true, true);
+	let mesh = Solid::mesh(&result, Default::default())?;
+	let scene = mesh.scene(cadrum::SceneOption { view: DVec3::new(1.0, 1.0, 2.0), shading: true, ..Default::default() });
 	scene.write_svg(&mut std::fs::File::create(format!("{example_name}.svg")).unwrap())?;
 	scene.write_png([640, 640], &mut std::fs::File::create(format!("{example_name}.png")).unwrap())?;
-	let mesh = Solid::mesh(&result, Default::default())?;
 	mesh.write_stl(&mut std::fs::File::create(format!("{example_name}.stl")).unwrap())?;
 	mesh.write_gltf_binary(&mut std::fs::File::create(format!("{example_name}.glb")).unwrap())?;
 
@@ -820,10 +821,10 @@ fn main() -> Result<(), cadrum::Error> {
 
 	Solid::write_step(&objects, &mut std::fs::File::create(format!("{example_name}.step")).unwrap())?;
 
-	let scene = Solid::mesh(&objects, Default::default())?.scene(DVec3::new(0.05, 0.05, 1.0), DVec3::Y, false, true);
+	let mesh = Solid::mesh(&objects, Default::default())?;
+	let scene = mesh.scene(cadrum::SceneOption { view: DVec3::new(0.05, 0.05, 1.0), up: DVec3::Y, hidden_edges: false, shading: true });
 	scene.write_svg(&mut std::fs::File::create(format!("{example_name}.svg")).unwrap())?;
 	scene.write_png([640, 640], &mut std::fs::File::create(format!("{example_name}.png")).unwrap())?;
-	let mesh = Solid::mesh(&objects, Default::default())?;
 	mesh.write_stl(&mut std::fs::File::create(format!("{example_name}.stl")).unwrap())?;
 	mesh.write_gltf_binary(&mut std::fs::File::create(format!("{example_name}.glb")).unwrap())?;
 
@@ -890,10 +891,10 @@ fn main() -> Result<(), Error> {
 
 	Solid::write_step(&result, &mut std::fs::File::create(format!("{example_name}.step")).unwrap())?;
 
-	let scene = Solid::mesh(&result, Default::default())?.scene(DVec3::new(1.0, 1.0, 2.0), DVec3::Z, true, true);
+	let mesh = Solid::mesh(&result, Default::default())?;
+	let scene = mesh.scene(cadrum::SceneOption { view: DVec3::new(1.0, 1.0, 2.0), shading: true, ..Default::default() });
 	scene.write_svg(&mut std::fs::File::create(format!("{example_name}.svg")).unwrap())?;
 	scene.write_png([640, 640], &mut std::fs::File::create(format!("{example_name}.png")).unwrap())?;
-	let mesh = Solid::mesh(&result, Default::default())?;
 	mesh.write_stl(&mut std::fs::File::create(format!("{example_name}.stl")).unwrap())?;
 	mesh.write_gltf_binary(&mut std::fs::File::create(format!("{example_name}.glb")).unwrap())?;
 
@@ -960,10 +961,10 @@ fn main() -> Result<(), Error> {
 
 	Solid::write_step(&result, &mut std::fs::File::create(format!("{example_name}.step")).unwrap())?;
 
-	let scene = Solid::mesh(&result, Default::default())?.scene(DVec3::new(1.0, 1.0, 2.0), DVec3::Z, true, true);
+	let mesh = Solid::mesh(&result, Default::default())?;
+	let scene = mesh.scene(cadrum::SceneOption { view: DVec3::new(1.0, 1.0, 2.0), shading: true, ..Default::default() });
 	scene.write_svg(&mut std::fs::File::create(format!("{example_name}.svg")).unwrap())?;
 	scene.write_png([640, 640], &mut std::fs::File::create(format!("{example_name}.png")).unwrap())?;
-	let mesh = Solid::mesh(&result, Default::default())?;
 	mesh.write_stl(&mut std::fs::File::create(format!("{example_name}.stl")).unwrap())?;
 	mesh.write_gltf_binary(&mut std::fs::File::create(format!("{example_name}.glb")).unwrap())?;
 

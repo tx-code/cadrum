@@ -123,10 +123,10 @@ fn main() -> Result<(), Error> {
 	Solid::write_step(&all, &mut std::fs::File::create(format!("{example_name}.step")).unwrap())?;
 
 	// Helical threads have dense hidden lines that clutter the output; disable them.
-	let scene = Solid::mesh(&all, Default::default())?.scene(DVec3::new(1.0, 1.0, -1.0), DVec3::Z, false, false);
+	let mesh = Solid::mesh(&all, Default::default())?;
+	let scene = mesh.scene(cadrum::SceneOption { view: DVec3::new(1.0, 1.0, -1.0), hidden_edges: false, ..Default::default() });
 	scene.write_svg(&mut std::fs::File::create(format!("{example_name}.svg")).unwrap())?;
 	scene.write_png([640, 640], &mut std::fs::File::create(format!("{example_name}.png")).unwrap())?;
-	let mesh = Solid::mesh(&all, Default::default())?;
 	mesh.write_stl(&mut std::fs::File::create(format!("{example_name}.stl")).unwrap())?;
 	mesh.write_gltf_binary(&mut std::fs::File::create(format!("{example_name}.glb")).unwrap())?;
 

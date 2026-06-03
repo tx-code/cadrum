@@ -20,11 +20,11 @@ fn main() -> Result<(), Error> {
 
 	Solid::write_step(&result, &mut std::fs::File::create(format!("{example_name}.step")).unwrap())?;
 
-	let scene = Solid::mesh(&result, Default::default())?.scene(DVec3::ONE, DVec3::Z, true, true);
+	let mesh = Solid::mesh(&result, Default::default())?;
+	let scene = mesh.scene(cadrum::SceneOption { shading: true, ..Default::default() });
 	scene.write_svg(&mut std::fs::File::create(format!("{example_name}.svg")).unwrap())?;
 	scene.write_png([640, 640], &mut std::fs::File::create(format!("{example_name}.png")).unwrap())?;
 
-	let mesh = Solid::mesh(&result, Default::default())?;
 	mesh.write_stl(&mut std::fs::File::create(format!("{example_name}.stl")).unwrap())?;
 	mesh.write_gltf_binary(&mut std::fs::File::create(format!("{example_name}.glb")).unwrap())?;
 

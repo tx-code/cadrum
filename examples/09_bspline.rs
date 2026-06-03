@@ -41,10 +41,10 @@ fn main() -> Result<(), cadrum::Error> {
 
 	Solid::write_step(&objects, &mut std::fs::File::create(format!("{example_name}.step")).unwrap())?;
 
-	let scene = Solid::mesh(&objects, Default::default())?.scene(DVec3::new(0.05, 0.05, 1.0), DVec3::Y, false, true);
+	let mesh = Solid::mesh(&objects, Default::default())?;
+	let scene = mesh.scene(cadrum::SceneOption { view: DVec3::new(0.05, 0.05, 1.0), up: DVec3::Y, hidden_edges: false, shading: true });
 	scene.write_svg(&mut std::fs::File::create(format!("{example_name}.svg")).unwrap())?;
 	scene.write_png([640, 640], &mut std::fs::File::create(format!("{example_name}.png")).unwrap())?;
-	let mesh = Solid::mesh(&objects, Default::default())?;
 	mesh.write_stl(&mut std::fs::File::create(format!("{example_name}.stl")).unwrap())?;
 	mesh.write_gltf_binary(&mut std::fs::File::create(format!("{example_name}.glb")).unwrap())?;
 
