@@ -512,49 +512,35 @@ void compound_add(TopoDS_Shape& compound, const TopoDS_Shape& child) {
 //   the face still represents the same plane — it just has smaller bounds.
 //   Generated(tool_face) returns empty because no wholly NEW face was created.
 //
-// out_history (rust::Vec<uint64_t>):
-//   For each face in src (both a and b), collect_relay_mapping builds a map
-//   from the pre-copy TShape* of the result face to the TShape* of the
-//   original src face. After BRepBuilderAPI_Copy, the pre→post mapping is
-//   resolved by index in the IndexedMap. emit_from_pairs pushes flat
-//   [post_id, src_id] pairs into out_history. a and b contributions are
-//   concatenated into the same out_history (no self/tool split — TShape*
-//   pointers are globally unique).
+// out_history (rust::Vec<uint64_t>) is built from three composable stages so
+// that boolean (copy-based) and shell/fillet/chamfer (no copy) share the relay
+// collection logic:
+//
+//   relay_from_builder  {result/pre TShape* → src TShape*}  (all builders)
+//   relay_from_pair     {post TShape* → pre TShape*}        (copy-based only)
+//   relay_into_history  compose → flat [post_id, src_id]    (all builders)
+//
+// For boolean the final BRepBuilderAPI_Copy renames every face, so stage 2 maps
+// post→pre by index and relay_into_history composes post→pre→src (fixed 2 hops).
+// For no-copy ops relay2 is null and relay1's keys are already the final faces.
+// Only the outermost map's keys (real result faces) are emitted, so no bogus
+// (pre/src-only) post ids leak in. a and b contributions share one out_history
+// (TShape* are globally unique, so no self/tool split is needed).
 
-// Helper: after BRepBuilderAPI_Copy, match pre/post faces by their index in
-// NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> (BRepBuilderAPI_Copy preserves traversal order).
-// Emit [post_id, src_id] pairs into `out` for every face tracked in `relay`.
-static void emit_from_pairs(
-    const TopoDS_Shape& pre_shape,
-    const TopoDS_Shape& post_shape,
-    const std::unordered_map<uint64_t, uint64_t>& relay,
-    rust::Vec<uint64_t>& out)
-{
-    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> pre_map, post_map;
-    TopExp::MapShapes(pre_shape, TopAbs_FACE, pre_map);
-    TopExp::MapShapes(post_shape, TopAbs_FACE, post_map);
-    // pre_map and post_map have the same size because the copy preserves topology.
-    for (int i = 1; i <= pre_map.Extent(); ++i) {
-        uint64_t pre_id = reinterpret_cast<uint64_t>(pre_map(i).TShape().get());
-        auto it = relay.find(pre_id);
-        if (it == relay.end()) continue;
-        uint64_t post_id = reinterpret_cast<uint64_t>(post_map(i).TShape().get());
-        out.push_back(post_id);
-        out.push_back(it->second);
-    }
-}
-
-// CellsBuilder 用の relay 採取。
-static void collect_relay_mapping_cells(
-    BOPAlgo_CellsBuilder& cb,
+// Stage 1 (all builders): {result/pre TShape* → src TShape*}. Modified() empty
+// ⇒ identity (pass-through face); non-empty ⇒ each split target maps back to src.
+// IsDeleted()/Modified() are non-const members, so `Builder&` (const won't compile).
+template <typename Builder>
+static void relay_from_builder(
+    Builder& builder,
     const TopoDS_Shape& src,
     std::unordered_map<uint64_t, uint64_t>& relay)
 {
     for (TopExp_Explorer ex(src, TopAbs_FACE); ex.More(); ex.Next()) {
         const TopoDS_Shape& sf = ex.Current();
         uint64_t src_id = reinterpret_cast<uint64_t>(sf.TShape().get());
-        if (cb.IsDeleted(sf)) continue;
-        const NCollection_List<TopoDS_Shape>& mods = cb.Modified(sf);
+        if (builder.IsDeleted(sf)) continue;
+        const NCollection_List<TopoDS_Shape>& mods = builder.Modified(sf);
         if (mods.IsEmpty()) {
             relay[src_id] = src_id;
         } else {
@@ -562,6 +548,51 @@ static void collect_relay_mapping_cells(
                 uint64_t pre_id = reinterpret_cast<uint64_t>(it.Value().TShape().get());
                 relay[pre_id] = src_id;
             }
+        }
+    }
+}
+
+// Stage 2 (copy-based ops only): {post TShape* → pre TShape*} by index.
+// BRepBuilderAPI_Copy preserves traversal order, so the i-th face before the
+// copy corresponds to the i-th face after it.
+static void relay_from_pair(
+    const TopoDS_Shape& pre_shape,
+    const TopoDS_Shape& post_shape,
+    std::unordered_map<uint64_t, uint64_t>& relay)
+{
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> pre_map, post_map;
+    TopExp::MapShapes(pre_shape, TopAbs_FACE, pre_map);
+    TopExp::MapShapes(post_shape, TopAbs_FACE, post_map);
+    // pre_map and post_map have the same size because the copy preserves topology.
+    for (int i = 1; i <= pre_map.Extent(); ++i) {
+        uint64_t pre_id = reinterpret_cast<uint64_t>(pre_map(i).TShape().get());
+        uint64_t post_id = reinterpret_cast<uint64_t>(post_map(i).TShape().get());
+        relay[post_id] = pre_id;
+    }
+}
+
+// Stage 3 (all builders): emit flat [post_id, src_id] pairs into `out`.
+//   relay2 == nullptr (no copy): relay1's keys are the final faces → flatten.
+//   relay2 != nullptr (copy):    iterate relay2's keys (post = final faces) and
+//                                resolve post→pre→src through relay1.
+// Fixed 1–2 hop composition (no transitive closure); emits only the outermost
+// map's keys, so identity self-loops in relay1 never leak as bogus pairs.
+static void relay_into_history(
+    const std::unordered_map<uint64_t, uint64_t>* relay1,
+    const std::unordered_map<uint64_t, uint64_t>* relay2,
+    rust::Vec<uint64_t>& out)
+{
+    if (relay2 == nullptr) {
+        for (const auto& kv : *relay1) {
+            out.push_back(kv.first);   // post (== final face)
+            out.push_back(kv.second);  // src
+        }
+    } else {
+        for (const auto& kv : *relay2) {
+            auto it = relay1->find(kv.second);  // pre → src
+            if (it == relay1->end()) continue;  // untracked face (matches old emit skip)
+            out.push_back(kv.first);            // post
+            out.push_back(it->second);          // src
         }
     }
 }
@@ -581,16 +612,11 @@ std::unique_ptr<TopoDS_Shape> builder_cells(
         if (solids.size() == 1 && clauses.size() == 2 && clauses[0] == 1 && clauses[1] == 0) {
             BRepBuilderAPI_Copy copier(solids[0], true, false);
             auto shape = std::make_unique<TopoDS_Shape>(copier.Shape());
-            // history: 各 face の self-mapping (post_id = src_id) を出力。
-            NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> pre_map, post_map;
-            TopExp::MapShapes(solids[0], TopAbs_FACE, pre_map);
-            TopExp::MapShapes(copier.Shape(), TopAbs_FACE, post_map);
-            for (int i = 1; i <= pre_map.Extent(); ++i) {
-                uint64_t src_id = reinterpret_cast<uint64_t>(pre_map(i).TShape().get());
-                uint64_t post_id = reinterpret_cast<uint64_t>(post_map(i).TShape().get());
-                out_history.push_back(post_id);
-                out_history.push_back(src_id);
-            }
+            // No builder: input faces pass through unchanged, so relay_from_pair
+            // alone yields {post → pre(==src)}; relay_into_history flattens it.
+            std::unordered_map<uint64_t, uint64_t> relay;
+            relay_from_pair(solids[0], copier.Shape(), relay);
+            relay_into_history(&relay, nullptr, out_history);
             return shape;
         }
 
@@ -620,14 +646,15 @@ std::unique_ptr<TopoDS_Shape> builder_cells(
         }
         cb.RemoveInternalBoundaries();
 
-        std::unordered_map<uint64_t, uint64_t> relay;
+        std::unordered_map<uint64_t, uint64_t> relay1, relay2;
         for (const auto& s : solids) {
-            collect_relay_mapping_cells(cb, s, relay);
+            relay_from_builder(cb, s, relay1);
         }
 
         BRepBuilderAPI_Copy copier(cb.Shape(), true, false);
         auto shape = std::make_unique<TopoDS_Shape>(copier.Shape());
-        emit_from_pairs(cb.Shape(), copier.Shape(), relay, out_history);
+        relay_from_pair(cb.Shape(), copier.Shape(), relay2);
+        relay_into_history(&relay1, &relay2, out_history);
         return shape;
     } catch (const Standard_Failure&) {
         return nullptr;
@@ -1405,7 +1432,8 @@ void shape_vec_push(std::vector<TopoDS_Shape>& v, const TopoDS_Shape& s) {
 std::unique_ptr<TopoDS_Shape> builder_thick_solid(
     const TopoDS_Shape& solid,
     const std::vector<TopoDS_Face>& open_faces,
-    double thickness)
+    double thickness,
+    rust::Vec<uint64_t>& out_history)
 {
     try {
         // Empty open_faces: MakeThickSolidByJoin degenerates to a plain offset
@@ -1445,6 +1473,16 @@ std::unique_ptr<TopoDS_Shape> builder_thick_solid(
             BRepBuilderAPI_MakeSolid solid_maker(outer);
             solid_maker.Add(TopoDS::Shell(inner.Reversed()));
             if (!solid_maker.IsDone()) return nullptr;
+            // Sealed case: all original faces are retained (as the outer or the
+            // reversed inner shell) with identical TShape*, so emit them as
+            // identity. The offset-generated inner/outer wall faces are new
+            // (src is an edge), so they are intentionally absent (Generated is
+            // not stored in a face→face schema).
+            for (TopExp_Explorer ex(solid, TopAbs_FACE); ex.More(); ex.Next()) {
+                uint64_t id = reinterpret_cast<uint64_t>(ex.Current().TShape().get());
+                out_history.push_back(id);
+                out_history.push_back(id);
+            }
             return std::make_unique<TopoDS_Shape>(solid_maker.Solid());
         }
 
@@ -1461,6 +1499,21 @@ std::unique_ptr<TopoDS_Shape> builder_thick_solid(
             /*join=*/ GeomAbs_Arc);
         builder.Build();
         if (!builder.IsDone()) return nullptr;
+        // Modified(face) for each retained face → outer wall; identity for any
+        // face that passes through unchanged. No copy, so relay keys are final.
+        std::unordered_map<uint64_t, uint64_t> relay;
+        relay_from_builder(builder, solid, relay);
+        // MakeThickSolid does NOT flag the user-removed open faces as IsDeleted,
+        // so relay_from_builder emits identity pairs for them — but those faces
+        // are absent from the result. Drop any pair whose src is a removed face.
+        for (const auto& f : open_faces) {
+            uint64_t removed_id = reinterpret_cast<uint64_t>(f.TShape().get());
+            for (auto it = relay.begin(); it != relay.end(); ) {
+                if (it->second == removed_id) it = relay.erase(it);
+                else ++it;
+            }
+        }
+        relay_into_history(&relay, nullptr, out_history);
         return std::make_unique<TopoDS_Shape>(builder.Shape());
     } catch (const Standard_Failure&) {
         return nullptr;
@@ -1470,12 +1523,19 @@ std::unique_ptr<TopoDS_Shape> builder_thick_solid(
 std::unique_ptr<TopoDS_Shape> builder_fillet(
     const TopoDS_Shape& solid,
     const std::vector<TopoDS_Edge>& edges,
-    double radius)
+    double radius,
+    rust::Vec<uint64_t>& out_history)
 {
     try {
         if (edges.empty()) {
             // No-op: hand back an independent shallow copy so the Rust side
             // always gets a fresh owned handle (matches the non-empty path).
+            // Every face passes through with identical TShape* → all-identity.
+            for (TopExp_Explorer ex(solid, TopAbs_FACE); ex.More(); ex.Next()) {
+                uint64_t id = reinterpret_cast<uint64_t>(ex.Current().TShape().get());
+                out_history.push_back(id);
+                out_history.push_back(id);
+            }
             return std::make_unique<TopoDS_Shape>(solid);
         }
         BRepFilletAPI_MakeFillet mk(solid);
@@ -1494,6 +1554,11 @@ std::unique_ptr<TopoDS_Shape> builder_fillet(
             if (!ex.More()) return nullptr;
             result = ex.Current();
         }
+        // No copy: Modified(face) targets are the final faces; untouched faces
+        // pass through as identity. relay keys are final → relay2 = nullptr.
+        std::unordered_map<uint64_t, uint64_t> relay;
+        relay_from_builder(mk, solid, relay);
+        relay_into_history(&relay, nullptr, out_history);
         return std::make_unique<TopoDS_Shape>(result);
     } catch (const Standard_Failure&) {
         return nullptr;
@@ -1503,10 +1568,17 @@ std::unique_ptr<TopoDS_Shape> builder_fillet(
 std::unique_ptr<TopoDS_Shape> builder_chamfer(
     const TopoDS_Shape& solid,
     const std::vector<TopoDS_Edge>& edges,
-    double distance)
+    double distance,
+    rust::Vec<uint64_t>& out_history)
 {
     try {
         if (edges.empty()) {
+            // No-op: every face passes through with identical TShape* → identity.
+            for (TopExp_Explorer ex(solid, TopAbs_FACE); ex.More(); ex.Next()) {
+                uint64_t id = reinterpret_cast<uint64_t>(ex.Current().TShape().get());
+                out_history.push_back(id);
+                out_history.push_back(id);
+            }
             return std::make_unique<TopoDS_Shape>(solid);
         }
         BRepFilletAPI_MakeChamfer mk(solid);
@@ -1525,6 +1597,11 @@ std::unique_ptr<TopoDS_Shape> builder_chamfer(
             if (!ex.More()) return nullptr;
             result = ex.Current();
         }
+        // No copy: Modified(face) targets are the final faces; untouched faces
+        // pass through as identity. relay keys are final → relay2 = nullptr.
+        std::unordered_map<uint64_t, uint64_t> relay;
+        relay_from_builder(mk, solid, relay);
+        relay_into_history(&relay, nullptr, out_history);
         return std::make_unique<TopoDS_Shape>(result);
     } catch (const Standard_Failure&) {
         return nullptr;
