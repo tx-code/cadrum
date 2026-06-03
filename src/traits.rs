@@ -109,6 +109,33 @@ use crate::common::error::Error;
 use crate::common::mesh::Mesh;
 use glam::{DMat3, DQuat, DVec3};
 
+/// Tessellation parameters for `Solid::mesh` and `Edge::approximation_segments`.
+///
+/// Use `Tessellation::default()` for a scale-independent default that suits
+/// most shapes; override individual fields with struct update syntax, e.g.
+/// `Tessellation { deflection_linear: 0.1, relative_linear: false, ..Default::default() }`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Tessellation {
+	/// Linear (chord) deflection: max distance between the facet/segment and the
+	/// true surface/curve. When `relative_linear` is true this is a fraction of
+	/// the edge's bounding-box size rather than an absolute distance.
+	pub deflection_linear: f64,
+	/// Angular deflection in radians: max angle between adjacent facet/segment
+	/// directions. Controls smoothness of curves independently of scale.
+	pub deflection_angular: f64,
+	/// Interpret `deflection_linear` as relative to the local feature size
+	/// (each edge's bounding-box max dimension) instead of an absolute distance.
+	pub relative_linear: bool,
+}
+
+impl Default for Tessellation {
+	fn default() -> Self {
+		// Relative 0.2% linear + 0.5 rad angular: scale-independent and "just
+		// right" for most shapes without over-tessellating.
+		Self { deflection_linear: 0.004, deflection_angular: 0.5, relative_linear: true }
+	}
+}
+
 // ==================== Transform ====================
 
 /// Spatial-transform operations: translate / rotate / scale / mirror.
@@ -297,7 +324,7 @@ pub trait EdgeStruct: Sized + Clone + Transform {
 	/// Whether the edge's underlying geometry is closed (e.g. a full circle).
 	fn is_closed(&self) -> bool;
 	/// Polyline approximation of the edge within `tolerance`, as ordered points.
-	fn approximation_segments(&self, tolerance: f64) -> Vec<DVec3>;
+	fn approximation_segments(&self, tessellation: Tessellation) -> Vec<DVec3>;
 	/// Project `p` onto the edge and return `(closest_point, unit_tangent)`.
 	/// The tangent follows the curve's native parameter direction. Panics only
 	/// on an edge with no 3D geometric curve (an FFI-level bug, which
@@ -611,7 +638,7 @@ pub trait SolidStruct: Sized + Clone + Transform{
 	fn write_step<'a, W: std::io::Write>(solids: impl IntoIterator<Item = &'a Self>, writer: &mut W) -> Result<(), Error> where Self: 'a;
 	fn write_brep_binary<'a, W: std::io::Write>(solids: impl IntoIterator<Item = &'a Self>, writer: &mut W) -> Result<(), Error> where Self: 'a;
 	fn write_brep_text<'a, W: std::io::Write>(solids: impl IntoIterator<Item = &'a Self>, writer: &mut W) -> Result<(), Error> where Self: 'a;
-	fn mesh<'a>(solids: impl IntoIterator<Item = &'a Self>, tolerance: f64) -> Result<Mesh, Error> where Self: 'a;
+	fn mesh<'a>(solids: impl IntoIterator<Item = &'a Self>, options: Tessellation) -> Result<Mesh, Error> where Self: 'a;
 
 	/// Write a fixed 4-view multiview PNG (1024×1024) of this solid to `writer`.
 	///
@@ -627,7 +654,7 @@ pub trait SolidStruct: Sized + Clone + Transform{
 		let bbox = <Self as SolidStruct>::bounding_box(self);
 		let diag = (bbox[1] - bbox[0]).length();
 		let tol = if diag > 0.0 { diag * 0.001 } else { 0.001 };
-		let mesh = Self::mesh(std::iter::once(self), tol)?;
+		let mesh = Self::mesh(std::iter::once(self), Tessellation { deflection_linear: tol, relative_linear: false, ..Default::default() })?;
 		mesh.write_multiview_png(writer)
 	}
 }

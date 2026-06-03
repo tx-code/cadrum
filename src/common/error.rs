@@ -78,6 +78,9 @@ pub enum Error {
 	/// STL write failed.
 	StlWriteFailed,
 
+	/// glTF (GLB binary) write failed.
+	GltfWriteFailed,
+
 	/// Invalid color string (unrecognized name or invalid hex format).
 	InvalidColor(String),
 
@@ -108,6 +111,7 @@ impl std::fmt::Display for Error {
 			Error::SvgExportFailed => write!(f, "SVG export failed"),
 			Error::PngExportFailed => write!(f, "PNG export failed"),
 			Error::StlWriteFailed => write!(f, "STL write failed"),
+			Error::GltfWriteFailed => write!(f, "glTF write failed"),
 			Error::InvalidColor(s) => write!(f, "Invalid color: \"{}\"", s),
 			Error::Unknown(msg) => write!(f, "Unknown error: {}", msg),
 		}

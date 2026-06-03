@@ -74,8 +74,8 @@ impl EdgeStruct for Edge {
 		ffi::edge_is_closed(&self.inner)
 	}
 
-	fn approximation_segments(&self, tolerance: f64) -> Vec<DVec3> {
-		ffi::edge_approximation_segments(&self.inner, tolerance, tolerance)
+	fn approximation_segments(&self, tessellation: crate::traits::Tessellation) -> Vec<DVec3> {
+		ffi::edge_approximation_segments(&self.inner, tessellation.deflection_linear, tessellation.deflection_angular, tessellation.relative_linear)
 			.chunks_exact(3)
 			.map(|c| DVec3::new(c[0], c[1], c[2]))
 			.collect()

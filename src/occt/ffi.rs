@@ -114,7 +114,7 @@ mod ffi_bridge {
 
 		// ==================== Meshing ====================
 
-		fn mesh_shape(shape: &TopoDS_Shape, tolerance: f64) -> MeshData;
+		fn mesh_shape(shape: &TopoDS_Shape, linear: f64, angular: f64, relative: bool) -> MeshData;
 
 		// ==================== Topology enumeration ====================
 
@@ -136,7 +136,7 @@ mod ffi_bridge {
 
 		// ==================== Edge Methods ====================
 
-		fn edge_approximation_segments(edge: &TopoDS_Edge, angular: f64, chord: f64) -> Vec<f64>;
+		fn edge_approximation_segments(edge: &TopoDS_Edge, linear: f64, angular: f64, relative: bool) -> Vec<f64>;
 
 		fn make_helix_edge(ax: f64, ay: f64, az: f64, xrx: f64, xry: f64, xrz: f64, radius: f64, pitch: f64, height: f64) -> UniquePtr<TopoDS_Edge>;
 		fn make_polygon_edges(coords: &[f64]) -> UniquePtr<CxxVector<TopoDS_Edge>>;
