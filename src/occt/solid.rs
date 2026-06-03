@@ -500,8 +500,8 @@ impl SolidStruct for Solid {
 		super::io::write_brep_text(solids, writer)
 	}
 
-	fn mesh<'a>(solids: impl IntoIterator<Item = &'a Self>, tolerance: f64) -> Result<crate::common::mesh::Mesh, Error> where Self: 'a {
-		super::io::mesh(solids, tolerance)
+	fn mesh<'a>(solids: impl IntoIterator<Item = &'a Self>, options: crate::traits::Tessellation) -> Result<crate::common::mesh::Mesh, Error> where Self: 'a {
+		super::io::mesh(solids, options)
 	}
 
 	// ==================== Queries ====================

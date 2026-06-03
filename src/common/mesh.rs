@@ -20,8 +20,13 @@ pub struct Mesh {
 	/// Per-face color map (face_id → Color).
 	#[cfg(feature = "color")]
 	pub colormap: HashMap<u64, Color>,
-	/// Topological edge polylines for SVG rendering.
-	pub edges: Vec<Vec<DVec3>>,
+	/// Topological edge polylines, NaN-separated (same convention as
+	/// `Scene2D::edges_visible`): a single `DVec3::NAN` separates consecutive
+	/// polylines, e.g. `[p0, p1, p2, NaN, p3, p4]` is the two polylines
+	/// `p0-p1-p2` and `p3-p4`. Populated at mesh time and consumed by
+	/// `write_gltf_binary` (the 3D scene / SVG / PNG pipeline derives its own
+	/// silhouette edges and does not read this field).
+	pub edges: Vec<DVec3>,
 }
 
 /// 2D rendering scene derived from a `Mesh` viewed from a given camera.
@@ -83,6 +88,170 @@ impl Mesh {
 		Ok(())
 	}
 
+	/// Write this mesh as binary glTF (`.glb`) to a writer.
+	/// このメッシュをバイナリ glTF (GLB) 形式で書き出す。
+	///
+	/// Emits a single mesh whose primitives are:
+	/// - triangles (`mode` TRIANGLES) — with the `color` feature, one primitive
+	///   per distinct face color, each backed by a `KHR_materials_unlit`
+	///   material (same-color faces share one material); otherwise a single
+	///   uncolored primitive.
+	/// - edges (`mode` LINES, `extras: {"cadrum":"edges"}`) built from
+	///   `self.edges`, so viewers render the wireframe and `cadrum` readers can
+	///   identify it.
+	///
+	/// Geometry lives in the GLB BIN chunk; JSON is hand-written (no serde
+	/// dependency). `RWGltf_CafWriter` is intentionally not used.
+	pub fn write_gltf_binary<W: std::io::Write>(&self, writer: &mut W) -> Result<(), super::error::Error> {
+		use super::error::Error;
+		let mut bin: Vec<u8> = Vec::new();
+		let mut buffer_views: Vec<String> = Vec::new();
+		let mut accessors: Vec<String> = Vec::new();
+		let mut primitives: Vec<String> = Vec::new();
+		#[allow(unused_mut)]
+		let mut materials: Vec<String> = Vec::new();
+
+		// ---- Triangle primitives (shared POSITION accessor) ----
+		let tri_groups = self.gltf_triangle_groups(&mut materials);
+		if !tri_groups.is_empty() && !self.vertices.is_empty() {
+			let mut bytes = Vec::with_capacity(self.vertices.len() * 12);
+			let (mut min, mut max) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
+			for v in &self.vertices {
+				let f = [v.x as f32, v.y as f32, v.z as f32];
+				for k in 0..3 { min[k] = min[k].min(f[k]); max[k] = max[k].max(f[k]); }
+				for c in f { bytes.extend_from_slice(&c.to_le_bytes()); }
+			}
+			let pos_bv = push_buffer_view(&mut buffer_views, &mut bin, &bytes, 34962);
+			let pos_acc = push_accessor_vec3(&mut accessors, pos_bv, self.vertices.len(), min, max);
+
+			for (indices, material) in tri_groups {
+				if indices.is_empty() { continue; }
+				let mut bytes = Vec::with_capacity(indices.len() * 4);
+				for &i in &indices { bytes.extend_from_slice(&i.to_le_bytes()); }
+				let bv = push_buffer_view(&mut buffer_views, &mut bin, &bytes, 34963);
+				let acc = push_accessor_scalar_u32(&mut accessors, bv, indices.len());
+				let mat = material.map_or(String::new(), |m| format!(r#","material":{}"#, m));
+				primitives.push(format!(r#"{{"attributes":{{"POSITION":{}}},"indices":{},"mode":4{}}}"#, pos_acc, acc, mat));
+			}
+		}
+
+		// ---- Edge LINES primitive ----
+		let (epos, eidx) = self.gltf_edge_buffers();
+		if !eidx.is_empty() {
+			let mut pbytes = Vec::with_capacity(epos.len() * 12);
+			let (mut min, mut max) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
+			for p in &epos {
+				for k in 0..3 { min[k] = min[k].min(p[k]); max[k] = max[k].max(p[k]); }
+				for c in p { pbytes.extend_from_slice(&c.to_le_bytes()); }
+			}
+			let pos_bv = push_buffer_view(&mut buffer_views, &mut bin, &pbytes, 34962);
+			let pos_acc = push_accessor_vec3(&mut accessors, pos_bv, epos.len(), min, max);
+			let mut ibytes = Vec::with_capacity(eidx.len() * 4);
+			for &i in &eidx { ibytes.extend_from_slice(&i.to_le_bytes()); }
+			let idx_bv = push_buffer_view(&mut buffer_views, &mut bin, &ibytes, 34963);
+			let idx_acc = push_accessor_scalar_u32(&mut accessors, idx_bv, eidx.len());
+			primitives.push(format!(r#"{{"attributes":{{"POSITION":{}}},"indices":{},"mode":1,"extras":{{"cadrum":"edges"}}}}"#, pos_acc, idx_acc));
+		}
+
+		// ---- Assemble JSON ----
+		let mut members: Vec<String> = vec![r#""asset":{"version":"2.0","generator":"cadrum"}"#.to_string()];
+		if !bin.is_empty() { members.push(format!(r#""buffers":[{{"byteLength":{}}}]"#, bin.len())); }
+		if !buffer_views.is_empty() { members.push(format!(r#""bufferViews":[{}]"#, buffer_views.join(","))); }
+		if !accessors.is_empty() { members.push(format!(r#""accessors":[{}]"#, accessors.join(","))); }
+		if !materials.is_empty() {
+			members.push(format!(r#""materials":[{}]"#, materials.join(",")));
+			members.push(r#""extensionsUsed":["KHR_materials_unlit"]"#.to_string());
+		}
+		if !primitives.is_empty() {
+			members.push(format!(r#""meshes":[{{"primitives":[{}]}}]"#, primitives.join(",")));
+			members.push(r#""nodes":[{"mesh":0}]"#.to_string());
+			members.push(r#""scenes":[{"nodes":[0]}]"#.to_string());
+			members.push(r#""scene":0"#.to_string());
+		}
+		let json = format!("{{{}}}", members.join(","));
+
+		// ---- GLB container (12-byte header + JSON chunk + optional BIN chunk) ----
+		let mut json_bytes = json.into_bytes();
+		while json_bytes.len() % 4 != 0 { json_bytes.push(b' '); }
+		while bin.len() % 4 != 0 { bin.push(0); }
+
+		let mut total = 12 + 8 + json_bytes.len();
+		if !bin.is_empty() { total += 8 + bin.len(); }
+
+		let mut w = |b: &[u8]| writer.write_all(b).map_err(|_| Error::GltfWriteFailed);
+		w(&0x46546C67u32.to_le_bytes())?; // magic "glTF"
+		w(&2u32.to_le_bytes())?;          // version 2
+		w(&(total as u32).to_le_bytes())?;
+		w(&(json_bytes.len() as u32).to_le_bytes())?;
+		w(&0x4E4F534Au32.to_le_bytes())?; // chunk type "JSON"
+		w(&json_bytes)?;
+		if !bin.is_empty() {
+			w(&(bin.len() as u32).to_le_bytes())?;
+			w(&0x004E4942u32.to_le_bytes())?; // chunk type "BIN\0"
+			w(&bin)?;
+		}
+		Ok(())
+	}
+
+	/// Group triangle indices by face color, appending one `KHR_materials_unlit`
+	/// material per distinct color to `materials`. Returns `(index_buffer,
+	/// Some(material_index))` per group. Faces without a color use a default
+	/// gray material.
+	#[cfg(feature = "color")]
+	fn gltf_triangle_groups(&self, materials: &mut Vec<String>) -> Vec<(Vec<u32>, Option<usize>)> {
+		const DEFAULT: [f32; 3] = [0.8667, 0.8667, 0.8667]; // 0xdd, matches scene fallback
+		let tri_count = self.indices.len() / 3;
+		let mut groups: Vec<(Vec<u32>, [f32; 3])> = Vec::new();
+		let mut key_to_group: HashMap<[u32; 3], usize> = HashMap::new();
+		for ti in 0..tri_count {
+			let col = self.colormap.get(&self.face_ids[ti]).map_or(DEFAULT, |c| [c.r, c.g, c.b]);
+			let key = [col[0].to_bits(), col[1].to_bits(), col[2].to_bits()];
+			let g = *key_to_group.entry(key).or_insert_with(|| {
+				groups.push((Vec::new(), col));
+				groups.len() - 1
+			});
+			groups[g].0.extend_from_slice(&[self.indices[ti * 3] as u32, self.indices[ti * 3 + 1] as u32, self.indices[ti * 3 + 2] as u32]);
+		}
+		groups
+			.into_iter()
+			.map(|(indices, col)| {
+				let mat = materials.len();
+				materials.push(format!(r#"{{"pbrMetallicRoughness":{{"baseColorFactor":[{},{},{},1.0],"metallicFactor":0.0,"roughnessFactor":1.0}},"alphaMode":"OPAQUE","doubleSided":true,"extensions":{{"KHR_materials_unlit":{{}}}}}}"#, col[0], col[1], col[2]));
+				(indices, Some(mat))
+			})
+			.collect()
+	}
+
+	/// Without the `color` feature: a single uncolored triangle group.
+	#[cfg(not(feature = "color"))]
+	fn gltf_triangle_groups(&self, _materials: &mut Vec<String>) -> Vec<(Vec<u32>, Option<usize>)> {
+		let indices: Vec<u32> = self.indices.iter().map(|&i| i as u32).collect();
+		if indices.is_empty() { Vec::new() } else { vec![(indices, None)] }
+	}
+
+	/// Expand the NaN-separated `edges` into a flat LINES position list plus a
+	/// segment index buffer (consecutive `(i, i+1)` pairs within each polyline;
+	/// NaN separators break the chain).
+	fn gltf_edge_buffers(&self) -> (Vec<[f32; 3]>, Vec<u32>) {
+		let mut pos: Vec<[f32; 3]> = Vec::new();
+		let mut idx: Vec<u32> = Vec::new();
+		let mut prev: Option<u32> = None;
+		for p in &self.edges {
+			if p.is_nan() {
+				prev = None;
+				continue;
+			}
+			let i = pos.len() as u32;
+			pos.push([p.x as f32, p.y as f32, p.z as f32]);
+			if let Some(pr) = prev {
+				idx.push(pr);
+				idx.push(i);
+			}
+			prev = Some(i);
+		}
+		(pos, idx)
+	}
+
 	/// Build a 2D scene from this mesh for the given camera.
 	///
 	/// - `view`: camera direction (higher `dot(view)` = closer).
@@ -99,8 +268,10 @@ impl Mesh {
 
 		let (triangles, color) = project_and_sort_triangles(self, dir, u, v, shading);
 
+		// `self.edges` holds topological edges for glTF export only; the 2D
+		// scene derives its own view-dependent silhouette set.
 		let silhouette_edges = detect_silhouette_edges(self, dir);
-		let all_edges: Vec<&Vec<DVec3>> = self.edges.iter().chain(silhouette_edges.iter()).collect();
+		let all_edges: Vec<&Vec<DVec3>> = silhouette_edges.iter().collect();
 
 		// Even when hidden lines are not rendered, we still need to drop
 		// occluded segments from the visible set — so always classify, then
@@ -111,6 +282,38 @@ impl Mesh {
 
 		Scene2D { triangles, color, edges_visible, edges_hidden }
 	}
+}
+
+// ==================== glTF writer helpers ====================
+
+/// Append `data` to the BIN buffer (4-byte aligned) and register a bufferView
+/// over it. Returns the new bufferView index.
+fn push_buffer_view(views: &mut Vec<String>, bin: &mut Vec<u8>, data: &[u8], target: u32) -> usize {
+	while bin.len() % 4 != 0 {
+		bin.push(0);
+	}
+	let offset = bin.len();
+	bin.extend_from_slice(data);
+	let idx = views.len();
+	views.push(format!(r#"{{"buffer":0,"byteOffset":{},"byteLength":{},"target":{}}}"#, offset, data.len(), target));
+	idx
+}
+
+/// Register a VEC3 float accessor (POSITION; min/max are required by glTF).
+fn push_accessor_vec3(accs: &mut Vec<String>, bv: usize, count: usize, min: [f32; 3], max: [f32; 3]) -> usize {
+	let idx = accs.len();
+	accs.push(format!(
+		r#"{{"bufferView":{},"componentType":5126,"count":{},"type":"VEC3","min":[{},{},{}],"max":[{},{},{}]}}"#,
+		bv, count, min[0], min[1], min[2], max[0], max[1], max[2]
+	));
+	idx
+}
+
+/// Register a SCALAR unsigned-int accessor (index buffer).
+fn push_accessor_scalar_u32(accs: &mut Vec<String>, bv: usize, count: usize) -> usize {
+	let idx = accs.len();
+	accs.push(format!(r#"{{"bufferView":{},"componentType":5125,"count":{},"type":"SCALAR"}}"#, bv, count));
+	idx
 }
 
 // ==================== Scene pipeline internals ====================

@@ -198,12 +198,12 @@ fn write_brep_with<'a, W: Write>(solids: impl IntoIterator<Item = &'a Solid>, wr
 	Ok(())
 }
 
-pub(super) fn mesh<'a>(solids: impl IntoIterator<Item = &'a Solid>, tolerance: f64) -> Result<crate::common::mesh::Mesh, Error> {
+pub(super) fn mesh<'a>(solids: impl IntoIterator<Item = &'a Solid>, options: crate::traits::Tessellation) -> Result<crate::common::mesh::Mesh, Error> {
 	use crate::common::mesh::Mesh;
 	use glam::{DVec2, DVec3};
 
 	let compound = CompoundShape::new(solids);
-	let data = ffi::mesh_shape(compound.inner(), tolerance);
+	let data = ffi::mesh_shape(compound.inner(), options.deflection_linear, options.deflection_angular, options.relative_linear);
 	if !data.success {
 		return Err(Error::TriangulationFailed);
 	}
@@ -212,6 +212,24 @@ pub(super) fn mesh<'a>(solids: impl IntoIterator<Item = &'a Solid>, tolerance: f
 	let uvs: Vec<DVec2> = (0..vertex_count).map(|i| DVec2::new(data.uvs[i * 2], data.uvs[i * 2 + 1])).collect();
 	let indices: Vec<usize> = data.indices.iter().map(|&i| i as usize).collect();
 	let face_ids = data.face_tshape_ids;
+
+	// Topological edge polylines, NaN-separated. Reuses the existing edge
+	// discretizer (GCPnts_TangentialDeflection). `relative_linear` applies to
+	// surface triangulation only; edges use `deflection_linear` as an absolute
+	// chord here.
+	let mut edges: Vec<DVec3> = Vec::new();
+	for e in ffi::shape_edges(compound.inner()).iter() {
+		let segs = ffi::edge_approximation_segments(e, options.deflection_linear, options.deflection_angular, options.relative_linear);
+		if segs.len() < 6 {
+			continue; // fewer than 2 points — nothing to draw
+		}
+		if !edges.is_empty() {
+			edges.push(DVec3::NAN);
+		}
+		for c in segs.chunks_exact(3) {
+			edges.push(DVec3::new(c[0], c[1], c[2]));
+		}
+	}
 
 	#[cfg(feature = "color")]
 	let colormap = {
@@ -231,6 +249,6 @@ pub(super) fn mesh<'a>(solids: impl IntoIterator<Item = &'a Solid>, tolerance: f
 		face_ids,
 		#[cfg(feature = "color")]
 		colormap,
-		edges: Vec::new(),
+		edges,
 	})
 }

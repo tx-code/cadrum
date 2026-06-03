@@ -815,11 +815,12 @@ void shape_bounding_box(const TopoDS_Shape& shape,
 
 // ==================== Meshing ====================
 
-MeshData mesh_shape(const TopoDS_Shape& shape, double tolerance) {
+MeshData mesh_shape(const TopoDS_Shape& shape, double linear, double angular, bool relative) {
     MeshData result;
     result.success = false;
 
-    BRepMesh_IncrementalMesh mesher(shape, tolerance);
+    // BRepMesh_IncrementalMesh(shape, linDeflection, isRelative, angDeflection, isInParallel)
+    BRepMesh_IncrementalMesh mesher(shape, linear, relative, angular, false);
     if (!mesher.IsDone()) {
         return result;
     }
@@ -1024,12 +1025,24 @@ bool face_project_point(const TopoDS_Face& face,
 // ==================== Edge Methods ====================
 
 rust::Vec<double> edge_approximation_segments(
-    const TopoDS_Edge& edge, double angular, double chord)
+    const TopoDS_Edge& edge, double linear, double angular, bool relative)
 {
     rust::Vec<double> out;
     try {
+        // Mirror mesh_shape's relative semantics: when relative, scale the chord
+        // by the edge's bounding-box max dimension (OCCT BRepMesh convention).
+        double eff_chord = linear;
+        if (relative) {
+            Bnd_Box box;
+            BRepBndLib::Add(edge, box);
+            if (!box.IsVoid()) {
+                double xmin, ymin, zmin, xmax, ymax, zmax;
+                box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+                eff_chord = linear * std::max(xmax - xmin, std::max(ymax - ymin, zmax - zmin));
+            }
+        }
         BRepAdaptor_Curve curve(edge);
-        GCPnts_TangentialDeflection approx(curve, angular, chord);
+        GCPnts_TangentialDeflection approx(curve, angular, eff_chord);
 
         int nb_points = approx.NbPoints();
         for (int i = 1; i <= nb_points; i++) {

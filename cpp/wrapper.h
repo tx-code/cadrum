@@ -232,7 +232,7 @@ void compound_add(TopoDS_Shape& compound, const TopoDS_Shape& child);
 
 // ==================== Meshing ====================
 
-MeshData mesh_shape(const TopoDS_Shape& shape, double tolerance);
+MeshData mesh_shape(const TopoDS_Shape& shape, double linear, double angular, bool relative);
 
 // ==================== Topology enumeration ====================
 
@@ -260,7 +260,7 @@ std::unique_ptr<TopoDS_Face> clone_face_handle(const TopoDS_Face& face);
 // Approximate an edge as a polyline. Takes independent angular/chord
 // deflection bounds. Returns a flat xyz `Vec<f64>` (length = 3 * point count).
 rust::Vec<double> edge_approximation_segments(
-    const TopoDS_Edge& edge, double angular, double chord);
+    const TopoDS_Edge& edge, double linear, double angular, bool relative);
 
 // Construct a single helical edge on a cylindrical surface centered at the
 // world origin. `axis` is the cylinder axis direction; `x_ref` is the
