@@ -71,7 +71,9 @@ jobs:
   # OCCT の静的アーカイブはユーザのリンク時 C++ ABI と一致する必要があるため、
   # Docker cross ではなくホストの clang/libc++ でソースビルドする
   # (windows-msvc を native runner で作るのと同じ理由)。
-  # macos-14 = Apple Silicon (aarch64), macos-13 = Intel (x86_64)。
+  # macos-14 = Apple Silicon (aarch64), macos-15-intel = Intel (x86_64)。
+  # ※ macos-13 (旧 Intel ラベル) は 2025-12-04 に廃止されたため、後継の
+  #    macos-15-intel を使う。https://github.blog/changelog/2025-09-19-github-actions-macos-13-runner-image-is-closing-down/
   # cmake / make / clang は GitHub macOS runner にプリインストール済み。
   # make cadrum-occt 内の CADRUM_BUNDLE_GCC_RUNTIME=1 は Darwin では no-op
   # (build.rs は *-windows-gnu / *-linux-gnu のみ libstdc++/libgcc を同梱)。
@@ -83,7 +85,7 @@ jobs:
           - target: aarch64-apple-darwin
             runs-on: macos-14
           - target: x86_64-apple-darwin
-            runs-on: macos-13
+            runs-on: macos-15-intel
     runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@v4
