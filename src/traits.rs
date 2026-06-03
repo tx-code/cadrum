@@ -130,9 +130,9 @@ pub struct Tessellation {
 
 impl Default for Tessellation {
 	fn default() -> Self {
-		// Relative 0.1% linear + 0.5 rad angular: scale-independent and "just
-		// right" for most shapes, mirroring `write_multiview_png`'s diag*0.001.
-		Self { deflection_linear: 0.001, deflection_angular: 0.5, relative_linear: true }
+		// Relative 0.2% linear + 0.5 rad angular: scale-independent and "just
+		// right" for most shapes without over-tessellating.
+		Self { deflection_linear: 0.002, deflection_angular: 0.5, relative_linear: true }
 	}
 }
 
