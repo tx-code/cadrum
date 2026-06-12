@@ -616,6 +616,21 @@ pub trait SolidStruct: Sized + Clone + Transform{
 	/// Internally uses `BRepOffsetAPI_ThruSections(isSolid=true, isRuled=ruled)`.
 	fn thru_sections<'a, S, I>(sections: S, ruled: bool) -> Result<Self, Error> where S: IntoIterator<Item = I>, I: IntoIterator<Item = &'a Self::Edge>, Self::Edge: 'a;
 
+	/// Sew (stitch) faces into a closed solid.
+	///
+	/// `faces` are face handles — typically harvested from existing solids
+	/// via `iter_face()`, or read from a surface-only exchange file — whose
+	/// boundary edges coincide pairwise within `tolerance`. Wraps OCCT's
+	/// `BRepBuilderAPI_Sewing`; the sewn shell must be **exactly one closed
+	/// shell**, which is then upgraded to a `Solid` (orientation is fixed
+	/// automatically so the enclosed volume is positive regardless of the
+	/// input faces' orientations).
+	///
+	/// Fails with [`Error::SewFailed`] when the faces leave gaps wider than
+	/// `tolerance`, overlap, form multiple disconnected shells, or include
+	/// stray faces that belong to no closed shell.
+	fn sew<'a>(faces: impl IntoIterator<Item = &'a Self::Face>, tolerance: f64) -> Result<Self, Error> where Self::Face: 'a;
+
 	/// Build a B-spline surface solid from a 2D control-point grid.
 	///
 	/// `grid[i][j]` — index `i` (0..M) runs along the longitudinal (U) direction,

@@ -380,6 +380,34 @@ impl SolidStruct for Solid {
 		))
 	}
 
+	// ==================== Sew ====================
+
+	fn sew<'a>(faces: impl IntoIterator<Item = &'a Face>, tolerance: f64) -> Result<Self, Error> where Face: 'a {
+		let mut face_vec = ffi::face_vec_new();
+		let mut count = 0usize;
+		for f in faces {
+			ffi::face_vec_push(face_vec.pin_mut(), &f.inner);
+			count += 1;
+		}
+		if count == 0 {
+			return Err(Error::SewFailed("sew: no faces given (need a face set forming one closed shell)".into()));
+		}
+		let shape = ffi::make_sewn_solid(&face_vec, tolerance);
+		if shape.is_null() {
+			return Err(Error::SewFailed(format!(
+				"sew: {} faces do not form exactly one closed shell within tolerance {} \
+				 (gaps, overlaps, multiple shells, or stray faces)",
+				count, tolerance
+			)));
+		}
+		Ok(Solid::new(
+			shape,
+			#[cfg(feature = "color")]
+			std::collections::HashMap::new(),
+			Default::default(),
+		))
+	}
+
 	// ==================== Bspline ====================
 
 	fn bspline(u: usize, v: usize, u_periodic: bool, point: impl Fn(usize, usize) -> DVec3) -> Result<Self, Error> {

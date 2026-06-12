@@ -1761,6 +1761,48 @@ std::unique_ptr<TopoDS_Shape> make_loft(
     }
 }
 
+// Sew (stitch) free faces into a single closed shell and upgrade it to a
+// solid. BRepBuilderAPI_Sewing merges boundary edges that coincide within
+// `tolerance`; the sewn result must contain exactly one closed shell —
+// gaps (open shell), leftover free faces, or multiple disconnected shells
+// all return nullptr. The solid is oriented with BRepLib::OrientClosedSolid
+// so the enclosed volume is positive regardless of input face orientation.
+std::unique_ptr<TopoDS_Shape> make_sewn_solid(
+    const std::vector<TopoDS_Face>& faces,
+    double tolerance)
+{
+    try {
+        if (faces.empty()) return nullptr;
+        BRepBuilderAPI_Sewing sewing(tolerance);
+        for (const auto& f : faces) sewing.Add(f);
+        sewing.Perform();
+        const TopoDS_Shape& sewn = sewing.SewedShape();
+        if (sewn.IsNull()) return nullptr;
+
+        // A fully sewn input comes back as a single TopAbs_SHELL; partial
+        // sewing yields a compound mixing shells and free faces, in which
+        // case requiring exactly one shell rejects the stray-face cases.
+        std::vector<TopoDS_Shell> shells;
+        if (sewn.ShapeType() == TopAbs_SHELL) {
+            shells.push_back(TopoDS::Shell(sewn));
+        } else {
+            for (TopExp_Explorer ex(sewn, TopAbs_SHELL); ex.More(); ex.Next()) {
+                shells.push_back(TopoDS::Shell(ex.Current()));
+            }
+        }
+        if (shells.size() != 1) return nullptr;
+        if (!BRep_Tool::IsClosed(shells.front())) return nullptr;
+
+        BRepBuilderAPI_MakeSolid solid_maker(shells.front());
+        if (!solid_maker.IsDone()) return nullptr;
+        TopoDS_Solid solid = solid_maker.Solid();
+        BRepLib::OrientClosedSolid(solid);
+        return std::make_unique<TopoDS_Shape>(solid);
+    } catch (const Standard_Failure&) {
+        return nullptr;
+    }
+}
+
 std::unique_ptr<TopoDS_Shape> make_bspline_solid(
     rust::Slice<const double> coords,
     uint32_t nu, uint32_t nv,

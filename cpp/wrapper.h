@@ -400,6 +400,16 @@ std::unique_ptr<TopoDS_Shape> make_loft(
     const std::vector<TopoDS_Edge>& all_edges,
     bool ruled);
 
+// Sew (stitch) free faces into a single closed shell and upgrade it to a
+// solid via BRepBuilderAPI_MakeSolid. The sewn result must contain exactly
+// one closed shell — gaps wider than `tolerance` (open shell), leftover free
+// faces, or multiple disconnected shells all return nullptr. The solid is
+// oriented with BRepLib::OrientClosedSolid so the enclosed volume is
+// positive regardless of input face orientation.
+std::unique_ptr<TopoDS_Shape> make_sewn_solid(
+    const std::vector<TopoDS_Face>& faces,
+    double tolerance);
+
 // Build a B-spline surface solid from a 2D point grid.
 // `coords` is a flat array of xyz triples, length = 3 * nu * nv.
 // V direction (cross-section, j index) is always periodic.
