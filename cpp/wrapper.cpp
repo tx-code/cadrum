@@ -1708,20 +1708,22 @@ std::unique_ptr<TopoDS_Shape> make_pipe_shell(
     }
 }
 
-// Loft (skin) a smooth solid through a sequence of cross-section wires.
+// Loft (skin) a solid through a sequence of cross-section wires.
 //
 // `all_edges` is a flat edge list with sections delimited by null-edge
 // sentinels (TopoDS_Edge().IsNull()); ≥2 sections required. Built via
 // BRepOffsetAPI_ThruSections with isSolid=true (cap open ends with planar
-// faces) and isRuled=false (B-spline / C² smoothed interpolation rather
-// than per-panel ruled surfaces).
+// faces). `ruled=false` gives B-spline / C² smoothed interpolation through
+// all sections; `ruled=true` gives per-panel ruled (straight-line) surfaces
+// between adjacent sections. Both pass through every section wire exactly.
 std::unique_ptr<TopoDS_Shape> make_loft(
-    const std::vector<TopoDS_Edge>& all_edges)
+    const std::vector<TopoDS_Edge>& all_edges,
+    bool ruled)
 {
     try {
         BRepOffsetAPI_ThruSections loft(
             /*isSolid=*/true,
-            /*isRuled=*/false,
+            /*isRuled=*/ruled,
             Precision::Confusion());
 
         // Split all_edges by null sentinels into section wires.
