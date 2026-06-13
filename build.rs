@@ -7,10 +7,10 @@ use std::path::{Path, PathBuf};
 const OCCT_VERSION: &str = "V8_0_0";
 
 /// Build revision for prebuilt tarballs. Update this when making non-OCCT-breaking changes that require cache invalidation (e.g. patch updates, build script changes, etc).
-const BUILD_REVISION: &str = "rev0";
+const BUILD_REVISION: &str = "rev1";
 
-/// `target` 指定あり: `cadrum-occt-v800-rev0-x86_64-pc-windows-gnu` (tarball / cache dir 名)
-/// `target` 指定なし: `cadrum-occt-v800-rev0` (`lzpel/cadrum` の GitHub Release タグ)
+/// `target` 指定あり: `cadrum-occt-v800-rev1-x86_64-pc-windows-gnu` (tarball / cache dir 名)
+/// `target` 指定なし: `cadrum-occt-v800-rev1` (`lzpel/cadrum` の GitHub Release タグ)
 fn cadrum_occt_name(target: Option<&str>) -> String {
 	let slug = OCCT_VERSION.to_ascii_lowercase().replace('_', "");
 	let release = format!("cadrum-occt-{}-{}", slug, BUILD_REVISION);
@@ -302,8 +302,8 @@ mod source {
 
 		eprintln!("Building OCCT with CMake (this may take a while)...");
 
-		let built = cmake::Config::new(&source_dir)
-			.profile("Release")
+		let mut cfg = cmake::Config::new(&source_dir);
+		cfg.profile("Release")
 			.define("BUILD_LIBRARY_TYPE", "Static")
 			.define("CMAKE_INSTALL_PREFIX", effective_root.to_str().unwrap())
 			.define("USE_FREETYPE", "OFF")
@@ -336,8 +336,26 @@ mod source {
 			.define("BUILD_SAMPLES_QT", "OFF")
 			.define("BUILD_Inspector", "OFF")
 			.define("BUILD_ENABLE_FPE_SIGNAL_HANDLER", "OFF")
-			.define("CMAKE_RC_FLAGS_INIT", "-C 1252")
-			.build();
+			.define("CMAKE_RC_FLAGS_INIT", "-C 1252");
+
+		// cmake クレートは cc-rs の CC_<target>/CXX_<target>/AR_<target> を CMAKE_* へ転送しない。
+		// クロスツールチェインを env で差せるよう、ここで橋渡しする（target 非依存）。
+		// 汎用(CC/CXX/AR) → target 固有(CC_<target> 等) の順で後勝ち。env が無い target(native 等)は
+		// 何もせず cmake の既定探索に任せる。generator は CMAKE_GENERATOR env、target/sysroot 等は
+		// CFLAGS_/CXXFLAGS_<target> から供給される（いずれも cmake クレートが env を読む）。
+		let tgt = env::var("TARGET").unwrap_or_default().replace('-', "_");
+		for (cmake_key, base) in [
+			("CMAKE_C_COMPILER", "CC"),
+			("CMAKE_CXX_COMPILER", "CXX"),
+			("CMAKE_AR", "AR"),
+		] {
+			for name in [base.to_string(), format!("{base}_{tgt}")] {
+				if let Ok(v) = env::var(&name) {
+					cfg.define(cmake_key, &v);
+				}
+			}
+		}
+		let built = cfg.build();
 
 		eprintln!("OCCT built at: {}", built.display());
 
@@ -373,11 +391,31 @@ mod source {
 		}
 	}
 
+	/// OS 依存(OSD)層など OS API を直接使う OCCT 実装ファイル。全 target で body-stub 化し
+	/// （シグネチャは残しリンク用シンボルを維持）、STUB_DROP_HEADERS の #include を外す。
+	/// cadrum の公開 I/O はストリームベースで OSD ファイル層を通らず、テストも std::fs で
+	/// バイト列を読み書きするので、source-build にこのスタブを当てても cargo test で検証できる。
+	/// 性能の要 OSD_ThreadPool / OSD_Parallel(_Threads/_TBB) / OSD_Thread は意図的に非対象。
+	const OSD_POSIX_STUBS: &[&str] = &[
+		"OSD_File.cxx", "OSD_Directory.cxx", "OSD_DirectoryIterator.cxx",
+		"OSD_FileIterator.cxx", "OSD_FileNode.cxx", "OSD_Path.cxx",
+		"OSD_Protection.cxx", "OSD_Process.cxx", "OSD_Host.cxx", "OSD_Disk.cxx",
+		"OSD_Environment.cxx", "OSD_signal.cxx", "OSD_Chronometer.cxx",
+		"OSD_MemInfo.cxx", "OSD_SharedLibrary.cxx",
+		"Message_PrinterSystemLog.cxx", "STEPConstruct_AP203Context.cxx",
+	];
+
+	/// 上記スタブから外す、環境により不在のヘッダ（wasm に無い等）。
+	/// native では既存ヘッダを消すだけで無害（body-stub 済みなので参照されない）。
+	const STUB_DROP_HEADERS: &[&str] = &[
+		"netdb.h", "sys/socket.h", "arpa/inet.h", "net/if.h", "ifaddrs.h",
+		"pwd.h", "grp.h", "dlfcn.h", "sys/statvfs.h", "sys/mount.h", "syslog.h",
+	];
+
 	/// Return the patched content for a file if it needs patching, `None` otherwise.
-	/// Pure function — does not write to disk.
+	/// Pure function — does not write to disk. 全 target 共通（target 分岐なし）。
 	fn patch_or_none(path: &Path) -> Option<String> {
 		let name = path.file_name()?.to_str()?;
-		let is_windows = env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows");
 
 		match name {
 			"XCAFDoc_VisMaterial.cxx" => Some(stub_content(path, true)),
@@ -388,15 +426,21 @@ mod source {
 				Some(comment_out_include_in(&stubbed, "execinfo.h"))
 			}
 
-			"OSD_WNT.cxx" if is_windows => Some(stub_content(path, false)),
-			"OSD_File.cxx" | "OSD_Protection.cxx" | "OSD_signal.cxx"
-			| "OSD_FileNode.cxx" | "OSD_Process.cxx"
-				if is_windows =>
-			{
-				Some(stub_content(path, true))
+			// OSD/POSIX 依存ファイル: body-stub + 不在ヘッダ除去（全 target 共通）。
+			n if OSD_POSIX_STUBS.contains(&n) => {
+				let mut s = stub_content(path, true);
+				for h in STUB_DROP_HEADERS {
+					s = comment_out_include_in(&s, h);
+				}
+				Some(s)
 			}
 
-			"occt_defs_flags.cmake" if is_windows => {
+			// Windows 専用 OSD 実装。windows.h + SEH(__try/__except) を含み body-stub できない
+			// ため空ファイル化（Windows 以外ではコンパイルされず無害）。
+			"OSD_WNT.cxx" => Some(stub_content(path, false)),
+
+			// OCC_CONVERT_SIGNALS(signal→例外変換) を全 target で無効化。OSD_signal スタブ化と整合。
+			"occt_defs_flags.cmake" => {
 				let content = std::fs::read_to_string(path).ok()?;
 				let needle = "add_definitions(-DOCC_CONVERT_SIGNALS)";
 				let replacement = "# add_definitions(-DOCC_CONVERT_SIGNALS)  # patched out by cadrum build.rs";
