@@ -583,26 +583,14 @@ pub trait SolidStruct: Sized + Clone + Transform{
 	// 想定外ケースに当たったら `Solid::new` の debug_assert で気付ける。
 	fn sweep<'a, 'b, 'c>(profile: impl IntoIterator<Item = &'a Self::Edge>, spine: impl IntoIterator<Item = &'b Self::Edge>, orient: ProfileOrient<'c>) -> Result<Self, Error> where Self::Edge: 'a + 'b;
 
-	/// Loft (skin) a smooth solid through a sequence of cross-section wires.
+	/// Loft (skin) a solid through a sequence of cross-section wires.
 	///
 	/// Each `section` is an ordered list of edges forming a closed wire (a
-	/// "rib"). The lofter interpolates a B-spline surface through all sections
-	/// in order, then caps the ends to form a `Solid`.
+	/// "rib"); ≥2 sections are required. The lofter builds a surface through
+	/// all sections in order, then caps the first/last sections with planar
+	/// faces to form a closed `Solid` (the standard "trunk" / "frustum" shape).
 	///
-	/// OCCT caps the first/last sections with planar faces to form a closed
-	/// solid (the standard "trunk" / "frustum" shape).
-	///
-	/// Shorthand for [`SolidStruct::thru_sections`] with `ruled=false`
-	/// (`BRepOffsetAPI_ThruSections(isSolid=true, isRuled=false)`).
-	fn loft<'a, S, I>(sections: S) -> Result<Self, Error> where S: IntoIterator<Item = I>, I: IntoIterator<Item = &'a Self::Edge>, Self::Edge: 'a { Self::thru_sections(sections, false) }
-
-	/// Loft a solid through cross-section wires with an explicit `ruled` flag.
-	///
-	/// Same input contract as [`SolidStruct::loft`]: each `section` is an
-	/// ordered edge list forming a closed wire, ≥2 sections, end sections are
-	/// capped with planar faces.
-	///
-	/// **どちらを選ぶか:**
+	/// **`ruled` でどちらを選ぶか:**
 	///
 	/// | `ruled` | surface | 適 |
 	/// |---|---|---|
@@ -614,7 +602,7 @@ pub trait SolidStruct: Sized + Clone + Transform{
 	/// spline vs straight lines).
 	///
 	/// Internally uses `BRepOffsetAPI_ThruSections(isSolid=true, isRuled=ruled)`.
-	fn thru_sections<'a, S, I>(sections: S, ruled: bool) -> Result<Self, Error> where S: IntoIterator<Item = I>, I: IntoIterator<Item = &'a Self::Edge>, Self::Edge: 'a;
+	fn loft<'a, S, I>(sections: S, ruled: bool) -> Result<Self, Error> where S: IntoIterator<Item = I>, I: IntoIterator<Item = &'a Self::Edge>, Self::Edge: 'a;
 
 	/// Sew (stitch) faces into a closed solid.
 	///

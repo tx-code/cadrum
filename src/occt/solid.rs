@@ -333,7 +333,7 @@ impl SolidStruct for Solid {
 
 	// ==================== Loft / ThruSections ====================
 
-	fn thru_sections<'a, S, I>(sections: S, ruled: bool) -> Result<Self, Error> where S: IntoIterator<Item = I>, I: IntoIterator<Item = &'a Edge>, Edge: 'a {
+	fn loft<'a, S, I>(sections: S, ruled: bool) -> Result<Self, Error> where S: IntoIterator<Item = I>, I: IntoIterator<Item = &'a Edge>, Edge: 'a {
 		let _guard = LOFT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
 		let mut all_edges = ffi::edge_vec_new();
@@ -350,7 +350,7 @@ impl SolidStruct for Solid {
 			}
 			if count == 0 {
 				return Err(Error::LoftFailed(format!(
-					"thru_sections: section {} is empty (each section must contain ≥1 edge)",
+					"loft: section {} is empty (each section must contain ≥1 edge)",
 					section_count
 				)));
 			}
@@ -359,7 +359,7 @@ impl SolidStruct for Solid {
 
 		if section_count < 2 {
 			return Err(Error::LoftFailed(format!(
-				"thru_sections: need ≥2 sections, got {} (a single section has no thickness to skin across)",
+				"loft: need ≥2 sections, got {} (a single section has no thickness to skin across)",
 				section_count
 			)));
 		}
@@ -367,7 +367,7 @@ impl SolidStruct for Solid {
 		let shape = ffi::make_loft(&all_edges, ruled);
 		if shape.is_null() {
 			return Err(Error::LoftFailed(format!(
-				"thru_sections: OCCT BRepOffsetAPI_ThruSections failed (sections={}, ruled={}). \
+				"loft: OCCT BRepOffsetAPI_ThruSections failed (sections={}, ruled={}). \
 				 Check that each section forms a valid closed wire and sections are not coplanar.",
 				section_count, ruled
 			)));
