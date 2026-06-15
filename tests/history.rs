@@ -37,7 +37,7 @@ fn test_no_face_source_ops_have_empty_history() {
 
 	let lower = [Edge::circle(3.0, DVec3::Z).expect("circle")];
 	let upper = [Edge::circle(1.5, DVec3::Z).expect("circle").translate(DVec3::Z * 8.0)];
-	let lofted = Solid::loft(&[lower, upper]).expect("loft");
+	let lofted = Solid::loft(&[lower, upper], false).expect("loft");
 	assert_eq!(lofted.iter_history().count(), 0, "loft");
 
 	let bspline = Solid::bspline(16, 8, true, |i, j| {
