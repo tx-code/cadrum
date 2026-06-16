@@ -18,9 +18,24 @@
 //!
 //! ## Parser constraints
 //!
-//!   - fn signatures must fit on one line (where/lifetime/generics included)
+//!   - the `fn` line up to (but excluding) any `where` is the captured signature;
+//!     it must fit on one line (lifetime/generics included)
+//!   - `where` clauses are dropped from the forwarder — both the inline form
+//!     (`... -> R where T: Bound;`) and the multi-line form (clause on following
+//!     lines). A forwarder never needs them: `Self` is concrete in the inherent
+//!     impl, so lifetime/assoc-type bounds are auto-satisfied. Any bound the
+//!     forwarder actually needs must be inline in the generic list, e.g.
+//!     `fn loft<'a, I: IntoIterator<Item = &'a Self::Edge>, S: IntoIterator<Item = I>>`.
 //!   - `#[cfg(...)]` attaches to the next fn only (single-line attribute)
 //!   - default impl bodies may span multiple lines (skipped via brace counting)
+//!
+//! ## Output shape
+//!
+//! Each forwarder is emitted as a 3-line block (signature + ` {`, tab-indented
+//! body, closing `}`) — the canonical form rustfmt produces under this repo's
+//! `rustfmt.toml` (`hard_tabs=true`, `max_width=1000`). Dropping `where` and
+//! matching rustfmt's block shape keeps `cargo fmt` and codegen idempotent:
+//! neither rewrites the other's output.
 
 use regex::Regex;
 use std::collections::HashSet;
@@ -47,10 +62,7 @@ fn main() {
 
 	// Read every input file once so we can use the same buffer for both
 	// parsing (pooling trait defs) and rewriting (comparing for diff).
-	let sources: Vec<(String, String)> = paths
-		.iter()
-		.map(|p| (p.clone(), std::fs::read_to_string(p).unwrap_or_else(|e| panic!("read {}: {}", p, e))))
-		.collect();
+	let sources: Vec<(String, String)> = paths.iter().map(|p| (p.clone(), std::fs::read_to_string(p).unwrap_or_else(|e| panic!("read {}: {}", p, e)))).collect();
 
 	let mut traits: Vec<TraitDef> = Vec::new();
 	for (_, src) in &sources {
@@ -107,10 +119,7 @@ fn parse_traits(src: &str) -> Vec<TraitDef> {
 				// のような誤った supertrait 名が混入する。
 				let s = s.as_str();
 				let s = s.split(" where ").next().unwrap_or(s);
-				s.split('+')
-					.map(|p| p.trim().to_string())
-					.filter(|p| !p.is_empty() && !p.starts_with('\''))
-					.collect()
+				s.split('+').map(|p| p.trim().to_string()).filter(|p| !p.is_empty() && !p.starts_with('\'')).collect()
 			});
 
 			let mut methods = Vec::new();
@@ -163,9 +172,7 @@ fn parse_method(line: &str, cfg: Option<String>, origin_trait: String) -> Option
 	let rest = &line[fn_idx + 3..];
 	let paren_open = rest.find('(')?;
 	let name_with_generics = rest[..paren_open].trim();
-	let name = name_with_generics
-		.find('<')
-		.map_or_else(|| name_with_generics.to_string(), |a| name_with_generics[..a].trim().to_string());
+	let name = name_with_generics.find('<').map_or_else(|| name_with_generics.to_string(), |a| name_with_generics[..a].trim().to_string());
 	let paren_close = rest.rfind(')')?;
 	let args_str = &rest[paren_open + 1..paren_close];
 
@@ -184,7 +191,15 @@ fn parse_method(line: &str, cfg: Option<String>, origin_trait: String) -> Option
 			args.push(arg[..colon].trim().to_string());
 		}
 	}
-	let signature = line[fn_idx..].trim().to_string();
+	// Drop any `where` clause from the captured signature. The forwarder never
+	// needs it: in the inherent impl `Self` is the concrete type, so lifetime /
+	// associated-type bounds (`Self::Edge: 'a`) are auto-satisfied. Emitting a
+	// `where` would also force rustfmt to break the block across lines, fighting
+	// codegen and breaking `cargo fmt` ⇄ codegen idempotency. Bounds the
+	// forwarder genuinely needs (e.g. loft's `S: IntoIterator<Item = I>`) must be
+	// written inline in the generic list instead.
+	let sig = line[fn_idx..].trim();
+	let signature = sig.split(" where ").next().unwrap_or(sig).trim().to_string();
 	Some(Method { cfg, signature, name, args, has_self, origin_trait })
 }
 
@@ -332,10 +347,7 @@ enum Context {
 
 fn determine_context(lines: &[&str], marker_idx: usize, depths: &[i32], marker_depth: i32) -> Context {
 	if marker_depth == 0 {
-		panic!(
-			"marker at line {} is at module level — markers must be inside `impl X {{ ... }}` or `pub trait X: ... {{ ... }}`",
-			marker_idx + 1
-		);
+		panic!("marker at line {} is at module level — markers must be inside `impl X {{ ... }}` or `pub trait X: ... {{ ... }}`", marker_idx + 1);
 	}
 	let target = marker_depth - 1;
 	let mut j = marker_idx;
@@ -369,10 +381,7 @@ fn render(context: &Context, indent: &str, traits: &[TraitDef]) -> Vec<String> {
 
 fn render_impl(ty: &str, indent: &str, traits: &[TraitDef]) -> Vec<String> {
 	let trait_name = format!("{}Struct", ty);
-	let td = traits
-		.iter()
-		.find(|t| t.name == trait_name)
-		.unwrap_or_else(|| panic!("no trait `{}` for impl `{}`", trait_name, ty));
+	let td = traits.iter().find(|t| t.name == trait_name).unwrap_or_else(|| panic!("no trait `{}` for impl `{}`", trait_name, ty));
 	let methods = collect_methods(td, traits);
 	let concrete = format!("crate::{}", ty);
 
@@ -383,7 +392,9 @@ fn render_impl(ty: &str, indent: &str, traits: &[TraitDef]) -> Vec<String> {
 		}
 		let sig = resolve_types_for_impl(&m.signature, &concrete);
 		let trait_path = format!("crate::traits::{}", m.origin_trait);
-		out.push(format!("{}pub {} {{<Self as {}>::{}({})}}", indent, sig, trait_path, m.name, format_call_args(m)));
+		out.push(format!("{}pub {} {{", indent, sig));
+		out.push(format!("{}\t<Self as {}>::{}({})", indent, trait_path, m.name, format_call_args(m)));
+		out.push(format!("{}}}", indent));
 	}
 	out
 }
@@ -397,7 +408,9 @@ fn render_trait_body(name: &str, indent: &str, traits: &[TraitDef]) -> Vec<Strin
 			if let Some(cfg) = &m.cfg {
 				out.push(format!("{}{}", indent, cfg));
 			}
-			out.push(format!("{}{} {{ <Self as {}>::{}({}) }}", indent, m.signature, super_name, m.name, format_call_args(m)));
+			out.push(format!("{}{} {{", indent, m.signature));
+			out.push(format!("{}\t<Self as {}>::{}({})", indent, super_name, m.name, format_call_args(m)));
+			out.push(format!("{}}}", indent));
 		}
 	}
 	out
