@@ -16,9 +16,9 @@ publish-ready: # guard: HEAD must be on main and match remote main's tip
 	git branch --show-current | grep -qx main # on main
 	gh api repos/lzpel/cadrum/commits/main --jq .sha | grep -q $(shell git rev-parse --short HEAD) # latest
 	cargo publish --dry-run # not-durty
-publish: publish-ready update # publish to crates.io
+publish: update publish-ready # publish to crates.io
 	# build (and wasm-smoke-test) the cross-wasm32-unknown-unknown image published below
-	$(MAKE) cross-wasm32-unknown-unknown GOAL=cadrum
+	$(MAKE) cross-wasm32-unknown-unknown GOAL=generate
 	# publish the wasm cross-build toolchain image (already built above by the
 	# cross-wasm32-unknown-unknown step) so users can run
 	# `docker run ghcr.io/lzpel/cross-wasm32-unknown-unknown cargo build` without installing wasi-sdk.
