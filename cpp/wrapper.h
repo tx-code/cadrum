@@ -81,10 +81,11 @@ private:
 std::unique_ptr<TopoDS_Shape> read_step_stream(RustReader& reader);
 bool write_step_stream(const TopoDS_Shape& shape, RustWriter& writer);
 #endif
-std::unique_ptr<TopoDS_Shape> read_brep_bin_stream(RustReader& reader);
-bool write_brep_bin_stream(const TopoDS_Shape& shape, RustWriter& writer);
-std::unique_ptr<TopoDS_Shape> read_brep_text_stream(RustReader& reader);
-bool write_brep_text_stream(const TopoDS_Shape& shape, RustWriter& writer);
+// `out_consumed` = length of the BinTools payload, where Rust's color trailer
+// begins. Written ONLY on success; on failure nullptr comes back and it is untouched.
+std::unique_ptr<TopoDS_Shape> read_brep_stream(
+    rust::Slice<const uint8_t> data, size_t& out_consumed);
+bool write_brep_stream(const TopoDS_Shape& shape, RustWriter& writer);
 
 // ==================== Shape Constructors ====================
 
@@ -459,18 +460,16 @@ namespace cadrum {
 
 // ==================== Colored STEP I/O ====================
 
-// Read a colored STEP stream. Returns the geometry shape; appends to
-// `out_ids` the TShape* address of each colored face, and to `out_rgb` its
-// RGB components in OCC native space (0.0–1.0) as a flat
-// [r0,g0,b0, r1,g1,b1, ...] sequence (length = 3 * out_ids.size()).
+// `out_ids` = TShape* of each colored sub-shape, `out_rgb` = flat [r,g,b,...] in
+// OCC native space. An id is a FACE's or a SOLID's — a styled_item targets either.
 // Returns nullptr on failure.
 std::unique_ptr<TopoDS_Shape> read_step_color_stream(
     RustReader&          reader,
     rust::Vec<uint64_t>& out_ids,
     rust::Vec<float>&    out_rgb);
 
-// Write a colored STEP stream. `ids` lists TShape* of colored faces; `rgb`
-// is the matching flat [r,g,b,...] sequence (length = 3 * ids.size()).
+// A solid id is written as one styled_item on that solid; a face style, being the
+// more specific one, overrides it.
 bool write_step_color_stream(
     const TopoDS_Shape&         shape,
     rust::Slice<const uint64_t> ids,

@@ -12,61 +12,70 @@ use std::io::{Read, Write};
 use crate::common::color::Color;
 
 // ==================== Color trailer ====================
+// Appended past the BinTools payload, which BinTools::Read stops at and ignores:
+// `[b"CDCL"][u32 count][count x (u32 trailer_ids index, f32 r, f32 g, f32 b)]`, LE.
 
 #[cfg(feature = "color")]
 const COLOR_TRAILER_MAGIC: &[u8; 4] = b"CDCL";
 
+/// `tail` is `&buf[consumed..]`, the bytes the BRep parser did not take. Anything that
+/// is not our trailer yields an empty map — the geometry is valid either way.
 #[cfg(feature = "color")]
-fn strip_color_trailer(buf: &[u8]) -> (std::collections::HashMap<u64, Color>, usize) {
-	if buf.len() < 8 || &buf[buf.len() - 4..] != COLOR_TRAILER_MAGIC {
-		return (std::collections::HashMap::new(), buf.len());
-	}
-	let entry_count = u32::from_le_bytes(buf[buf.len() - 8..buf.len() - 4].try_into().unwrap()) as usize;
-	let trailer_size = 8 + entry_count * 16;
-	if buf.len() < trailer_size {
-		return (std::collections::HashMap::new(), buf.len());
-	}
-	let brep_len = buf.len() - trailer_size;
-	let entries_start = brep_len;
+fn read_color_trailer(tail: &[u8]) -> std::collections::HashMap<u32, Color> {
 	let mut colormap = std::collections::HashMap::new();
-	for i in 0..entry_count {
-		let off = entries_start + i * 16;
-		let idx = u32::from_le_bytes(buf[off..off + 4].try_into().unwrap());
-		let r = f32::from_le_bytes(buf[off + 4..off + 8].try_into().unwrap());
-		let g = f32::from_le_bytes(buf[off + 8..off + 12].try_into().unwrap());
-		let b = f32::from_le_bytes(buf[off + 12..off + 16].try_into().unwrap());
-		colormap.insert(idx as u64, Color { r, g, b });
+	if tail.len() < 8 || &tail[..4] != COLOR_TRAILER_MAGIC {
+		return colormap;
 	}
-	(colormap, brep_len)
+	let count = u32::from_le_bytes(tail[4..8].try_into().unwrap()) as usize;
+	// `count` comes from the file, and `usize` is 32-bit on wasm32.
+	let Some(end) = count.checked_mul(16).and_then(|n| n.checked_add(8)) else {
+		return colormap;
+	};
+	// `<`, not `!=`: the count self-delimits, so bytes appended after us are not an error.
+	if tail.len() < end {
+		return colormap;
+	}
+	for e in tail[8..end].chunks_exact(16) {
+		let idx = u32::from_le_bytes(e[0..4].try_into().unwrap());
+		let r = f32::from_le_bytes(e[4..8].try_into().unwrap());
+		let g = f32::from_le_bytes(e[8..12].try_into().unwrap());
+		let b = f32::from_le_bytes(e[12..16].try_into().unwrap());
+		colormap.insert(idx, Color { r, g, b });
+	}
+	colormap
 }
 
+/// STEP cannot index like this — `try_sew_orphan_faces` shifts every index, so it
+/// carries explicit ids instead.
 #[cfg(feature = "color")]
-fn resolve_color_trailer(inner: &ffi::TopoDS_Shape, index_colormap: &std::collections::HashMap<u64, Color>) -> std::collections::HashMap<u64, Color> {
-	let faces = ffi::shape_faces(inner);
-	let index_to_id: Vec<u64> = faces.iter().map(ffi::face_tshape_id).collect();
-	index_colormap.iter().filter_map(|(&idx, &color)| index_to_id.get(idx as usize).map(|&id| (id, color))).collect()
+fn trailer_ids(shape: &ffi::TopoDS_Shape) -> Vec<u64> {
+	// Bound to locals: both are `UniquePtr<CxxVector<..>>` that the iterators borrow.
+	let solids = ffi::decompose_into_solids(shape);
+	let faces = ffi::shape_faces(shape);
+	solids.iter().map(ffi::shape_tshape_id).chain(faces.iter().map(ffi::face_tshape_id)).collect()
 }
 
 #[cfg(feature = "color")]
 fn write_color_trailer<W: Write>(compound: &CompoundShape, writer: &mut W) -> Result<(), Error> {
-	let colormap = compound.colormap();
-	if colormap.is_empty() {
+	let id_to_index: std::collections::HashMap<u64, u32> = trailer_ids(compound.inner()).into_iter().enumerate().map(|(i, id)| (id, i as u32)).collect();
+	// `CompoundShape::decompose` gives every solid a clone of the merged colormap, so
+	// a solid carries its siblings' keys too; those have no index and drop out here.
+	let mut entries: Vec<(u32, f32, f32, f32)> = compound.colormap().iter().filter_map(|(id, rgb)| id_to_index.get(id).map(|&idx| (idx, rgb.r, rgb.g, rgb.b))).collect();
+	if entries.is_empty() {
 		return Ok(());
 	}
-	let faces = ffi::shape_faces(compound.inner());
-	let id_to_index: std::collections::HashMap<u64, u32> = faces.iter().enumerate().map(|(i, f)| (ffi::face_tshape_id(f), i as u32)).collect();
-	let mut entries: Vec<(u32, f32, f32, f32)> = colormap.iter().filter_map(|(id, rgb)| id_to_index.get(id).map(|&idx| (idx, rgb.r, rgb.g, rgb.b))).collect();
 	entries.sort_by_key(|e| e.0);
 
+	let mut out = Vec::with_capacity(8 + entries.len() * 16);
+	out.extend_from_slice(COLOR_TRAILER_MAGIC);
+	out.extend_from_slice(&(entries.len() as u32).to_le_bytes());
 	for (idx, r, g, b) in &entries {
-		writer.write_all(&idx.to_le_bytes()).map_err(|_| Error::BrepWriteFailed)?;
-		writer.write_all(&r.to_le_bytes()).map_err(|_| Error::BrepWriteFailed)?;
-		writer.write_all(&g.to_le_bytes()).map_err(|_| Error::BrepWriteFailed)?;
-		writer.write_all(&b.to_le_bytes()).map_err(|_| Error::BrepWriteFailed)?;
+		out.extend_from_slice(&idx.to_le_bytes());
+		out.extend_from_slice(&r.to_le_bytes());
+		out.extend_from_slice(&g.to_le_bytes());
+		out.extend_from_slice(&b.to_le_bytes());
 	}
-	writer.write_all(&(entries.len() as u32).to_le_bytes()).map_err(|_| Error::BrepWriteFailed)?;
-	writer.write_all(COLOR_TRAILER_MAGIC).map_err(|_| Error::BrepWriteFailed)?;
-	Ok(())
+	writer.write_all(&out).map_err(|_| Error::BrepWriteFailed)
 }
 
 // ==================== Reader / writer / mesh helpers ====================
@@ -99,41 +108,27 @@ pub(super) fn read_step<R: Read>(reader: &mut R) -> Result<Vec<Solid>, Error> {
 	}
 }
 
-/// Read solids from a BRep binary stream. Color trailer is parsed if present.
-pub(super) fn read_brep_binary<R: Read>(reader: &mut R) -> Result<Vec<Solid>, Error> {
-	read_brep_with(reader, ffi::read_brep_bin_stream)
-}
+pub(super) fn read_brep<R: Read>(reader: &mut R) -> Result<Vec<Solid>, Error> {
+	// Buffered whole: `BinTools::Read` seeks backwards to resolve shared sub-shape
+	// references, so it cannot run off a sequential stream.
+	let mut buf = Vec::new();
+	reader.read_to_end(&mut buf).map_err(|_| Error::BrepReadFailed)?;
 
-/// Read solids from a BRep text stream. Color trailer is parsed if present.
-pub(super) fn read_brep_text<R: Read>(reader: &mut R) -> Result<Vec<Solid>, Error> {
-	read_brep_with(reader, ffi::read_brep_text_stream)
-}
+	// Payload length — where a trailer would begin. Unwritten, and unread, on null.
+	let mut consumed = 0usize;
+	let inner = ffi::read_brep_stream(&buf, &mut consumed);
+	if inner.is_null() {
+		return Err(Error::BrepReadFailed);
+	}
 
-/// Shared body for BRep binary/text reads. The two variants differ only in
-/// which FFI stream parser they call; everything else (color trailer handling,
-/// null check, decompose) is identical.
-fn read_brep_with<R: Read>(reader: &mut R, ffi_read: fn(&mut RustReader) -> cxx::UniquePtr<ffi::TopoDS_Shape>) -> Result<Vec<Solid>, Error> {
 	#[cfg(feature = "color")]
 	{
-		let mut buf = Vec::new();
-		reader.read_to_end(&mut buf).map_err(|_| Error::BrepReadFailed)?;
-		let (index_colormap, brep_len) = strip_color_trailer(&buf);
-		let mut cursor = std::io::Cursor::new(&buf[..brep_len]);
-		let mut rust_reader = RustReader::from_ref(&mut cursor);
-		let inner = ffi_read(&mut rust_reader);
-		if inner.is_null() {
-			return Err(Error::BrepReadFailed);
-		}
-		let colormap = resolve_color_trailer(&inner, &index_colormap);
+		let ids = trailer_ids(&inner);
+		let colormap = read_color_trailer(buf.get(consumed..).unwrap_or_default()).into_iter().filter_map(|(idx, color)| ids.get(idx as usize).map(|&id| (id, color))).collect();
 		Ok(CompoundShape::from_raw(inner, colormap, Default::default()).decompose())
 	}
 	#[cfg(not(feature = "color"))]
 	{
-		let mut rust_reader = RustReader::from_ref(reader);
-		let inner = ffi_read(&mut rust_reader);
-		if inner.is_null() {
-			return Err(Error::BrepReadFailed);
-		}
 		Ok(CompoundShape::from_raw(inner, Default::default()).decompose())
 	}
 }
@@ -171,24 +166,14 @@ pub(super) fn write_step<'a, W: Write>(solids: impl IntoIterator<Item = &'a Soli
 	}
 }
 
-/// Write solids to a BRep binary stream. Color trailer is appended if `color`
-/// feature is enabled.
-pub(super) fn write_brep_binary<'a, W: Write>(solids: impl IntoIterator<Item = &'a Solid>, writer: &mut W) -> Result<(), Error> {
-	write_brep_with(solids, writer, ffi::write_brep_bin_stream)
-}
-
-/// Write solids to a BRep text stream. Color trailer is appended if `color`
-/// feature is enabled.
-pub(super) fn write_brep_text<'a, W: Write>(solids: impl IntoIterator<Item = &'a Solid>, writer: &mut W) -> Result<(), Error> {
-	write_brep_with(solids, writer, ffi::write_brep_text_stream)
-}
-
-/// Shared body for BRep binary/text writes — see `read_brep_with` for context.
-fn write_brep_with<'a, W: Write>(solids: impl IntoIterator<Item = &'a Solid>, writer: &mut W, ffi_write: fn(&ffi::TopoDS_Shape, &mut RustWriter) -> bool) -> Result<(), Error> {
+pub(super) fn write_brep<'a, W: Write>(solids: impl IntoIterator<Item = &'a Solid>, writer: &mut W) -> Result<(), Error> {
 	let compound = CompoundShape::new(solids);
-	let mut rust_writer = RustWriter::from_ref(writer);
-	if !ffi_write(compound.inner(), &mut rust_writer) {
-		return Err(Error::BrepWriteFailed);
+	{
+		// Scoped: the streambuf flushes on drop, so the payload lands before the trailer.
+		let mut rust_writer = RustWriter::from_ref(writer);
+		if !ffi::write_brep_stream(compound.inner(), &mut rust_writer) {
+			return Err(Error::BrepWriteFailed);
+		}
 	}
 	#[cfg(feature = "color")]
 	write_color_trailer(&compound, writer)?;
@@ -198,6 +183,25 @@ fn write_brep_with<'a, W: Write>(solids: impl IntoIterator<Item = &'a Solid>, wr
 pub(super) fn mesh<'a>(solids: impl IntoIterator<Item = &'a Solid>, options: crate::traits::Tessellation) -> Result<crate::common::mesh::Mesh, Error> {
 	use crate::common::mesh::Mesh;
 	use glam::DVec3;
+
+	#[cfg(feature = "color")]
+	let solids: Vec<&Solid> = solids.into_iter().collect();
+	// `Mesh` has only a face level, so a solid-level colour is expanded onto its faces
+	// here. STEP and the BRep trailer keep the distinction; the renderers cannot.
+	#[cfg(feature = "color")]
+	let face_colors = {
+		let mut map = std::collections::HashMap::new();
+		for s in solids.iter().copied() {
+			if let Some(&c) = s.colormap().get(&s.id()) {
+				for f in ffi::shape_faces(s.inner()).iter() {
+					map.insert(ffi::face_tshape_id(f), c);
+				}
+			}
+			// Face colours are the more specific style and win over the solid's.
+			map.extend(s.colormap().iter().map(|(&k, &v)| (k, v)));
+		}
+		map
+	};
 
 	let compound = CompoundShape::new(solids);
 	let data = ffi::mesh_shape(compound.inner(), options.deflection_linear, options.deflection_angular, options.relative_linear);
@@ -232,7 +236,7 @@ pub(super) fn mesh<'a>(solids: impl IntoIterator<Item = &'a Solid>, options: cra
 	let colormap = {
 		let mut map = std::collections::HashMap::new();
 		for &fid in &face_ids {
-			if let Some(&color) = compound.colormap().get(&fid) {
+			if let Some(&color) = face_colors.get(&fid) {
 				map.insert(fid, color);
 			}
 		}

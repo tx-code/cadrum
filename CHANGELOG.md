@@ -21,8 +21,20 @@ changes until `1.0`.
 
 ### Unreleased
 
+#### Removed
+
+- **BRep text (ASCII `BRepTools`) I/O.** BRep now means OCCT's `BinTools` binary
+  format alone; an ASCII `.brep` returns `Error::BrepReadFailed`. Why:
+  [notes](notes/20260714-BRep_textを捨てて前置マジックに移行.md). (#247)
+
 #### Breaking
 
+- **`Solid::read_brep_binary` / `write_brep_binary` are now `read_brep` /
+  `write_brep`.** With text gone there is only one BRep. (#247)
+- **The BRep colour trailer is now `[payload][b"CDCL"][u32 count][entries]`**,
+  found where the payload ended instead of by scanning the last four bytes, and
+  it keys solids as well as faces — a solid colour is no longer flattened onto
+  its faces. Files from an earlier cadrum load with their colours dropped. (#247)
 - **Renamed the `source-build` feature to `source`.** Update
   `--features source-build` to `--features source`. (#182)
 

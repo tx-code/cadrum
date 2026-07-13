@@ -43,6 +43,11 @@ fn remap_colormap_by_order(old_inner: &ffi::TopoDS_Shape, new_inner: &ffi::TopoD
 			colormap.insert(ffi::face_tshape_id(new_face), color);
 		}
 	}
+	// The solid's own colour is keyed by its TShape id, which these ops change
+	// (they rebuild topology), so it needs the same remap the faces get.
+	if let Some(&color) = old_colormap.get(&ffi::shape_tshape_id(old_inner)) {
+		colormap.insert(ffi::shape_tshape_id(new_inner), color);
+	}
 	colormap
 }
 
@@ -60,6 +65,8 @@ pub struct Solid {
 	inner: cxx::UniquePtr<ffi::TopoDS_Shape>,
 	edges: OnceLock<Vec<Edge>>,
 	faces: OnceLock<Vec<Face>>,
+	/// Keyed by a face's TShape id, or by `Solid::id()` for the solid as a whole; a face
+	/// colour wins over the solid's. Other solids' keys may be present (`decompose`).
 	#[cfg(feature = "color")]
 	colormap: std::collections::HashMap<u64, crate::common::color::Color>,
 	/// Face-derivation history from the most recent boolean operation.
@@ -116,11 +123,17 @@ impl Solid {
 		&mut self.colormap
 	}
 
-	/// Carry each source face's color onto its derived result faces via
-	/// `history` `[post_id, src_id]` pairs (shell/fillet/chamfer/clean).
+	/// Carry face colours across `history` `[post_id, src_id]` pairs, and the solid's
+	/// own colour onto the new solid (shell/fillet/chamfer/clean).
 	#[cfg(feature = "color")]
-	fn remap_colormap(&self, history: &[u64]) -> std::collections::HashMap<u64, crate::common::color::Color> {
-		history.chunks_exact(2).filter_map(|p| Some((p[0], *self.colormap.get(&p[1])?))).collect()
+	fn remap_colormap(&self, new_inner: &ffi::TopoDS_Shape, history: &[u64]) -> std::collections::HashMap<u64, crate::common::color::Color> {
+		let mut colormap: std::collections::HashMap<u64, crate::common::color::Color> = history.chunks_exact(2).filter_map(|p| Some((p[0], *self.colormap.get(&p[1])?))).collect();
+		// `history` is a face→face relation and has no entry for the solid, whose
+		// TShape id these ops change. Carry it across by hand.
+		if let Some(&color) = self.colormap.get(&ffi::shape_tshape_id(&self.inner)) {
+			colormap.insert(ffi::shape_tshape_id(new_inner), color);
+		}
+		colormap
 	}
 
 	// ==================== Constructors ====================
@@ -264,10 +277,12 @@ impl SolidStruct for Solid {
 		if shape.is_null() {
 			return Err(Error::ShellFailed);
 		}
+		#[cfg(feature = "color")]
+		let colormap = self.remap_colormap(&shape, &history);
 		Ok(Solid::new(
 			shape,
 			#[cfg(feature = "color")]
-			self.remap_colormap(&history),
+			colormap,
 			history,
 		))
 	}
@@ -284,10 +299,12 @@ impl SolidStruct for Solid {
 		if shape.is_null() {
 			return Err(Error::FilletFailed);
 		}
+		#[cfg(feature = "color")]
+		let colormap = self.remap_colormap(&shape, &history);
 		Ok(Solid::new(
 			shape,
 			#[cfg(feature = "color")]
-			self.remap_colormap(&history),
+			colormap,
 			history,
 		))
 	}
@@ -302,10 +319,12 @@ impl SolidStruct for Solid {
 		if shape.is_null() {
 			return Err(Error::ChamferFailed);
 		}
+		#[cfg(feature = "color")]
+		let colormap = self.remap_colormap(&shape, &history);
 		Ok(Solid::new(
 			shape,
 			#[cfg(feature = "color")]
-			self.remap_colormap(&history),
+			colormap,
 			history,
 		))
 	}
@@ -467,10 +486,12 @@ impl SolidStruct for Solid {
 		if inner.is_null() {
 			return Err(Error::CleanFailed);
 		}
+		#[cfg(feature = "color")]
+		let colormap = self.remap_colormap(&inner, &history);
 		Ok(Solid::new(
 			inner,
 			#[cfg(feature = "color")]
-			self.remap_colormap(&history),
+			colormap,
 			history,
 		))
 	}
@@ -530,13 +551,31 @@ impl SolidStruct for Solid {
 			m
 		};
 
+		// No history carries a solid colour — the result volume descends from no single
+		// operand — so it survives only when the operands that have one agree.
+		#[cfg(feature = "color")]
+		let agreed = {
+			let mut colors = solids.iter().filter_map(|s| s.colormap.get(&s.id()).copied());
+			colors.next().filter(|first| colors.all(|c| c == *first))
+		};
+
 		let compound = CompoundShape::from_raw(
 			inner,
 			#[cfg(feature = "color")]
 			colormap,
 			history,
 		);
-		Ok(compound.decompose())
+		#[cfg_attr(not(feature = "color"), allow(unused_mut))]
+		let mut out = compound.decompose();
+		// Only now do the result solids exist, so only now can their ids be keyed.
+		#[cfg(feature = "color")]
+		if let Some(c) = agreed {
+			for s in &mut out {
+				let id = s.id();
+				s.colormap_mut().insert(id, c);
+			}
+		}
+		Ok(out)
 	}
 
 	// --- I/O (delegates to super::io helpers) ---
@@ -545,12 +584,8 @@ impl SolidStruct for Solid {
 		super::io::read_step(reader)
 	}
 
-	fn read_brep_binary<R: std::io::Read>(reader: &mut R) -> Result<Vec<Self>, Error> {
-		super::io::read_brep_binary(reader)
-	}
-
-	fn read_brep_text<R: std::io::Read>(reader: &mut R) -> Result<Vec<Self>, Error> {
-		super::io::read_brep_text(reader)
+	fn read_brep<R: std::io::Read>(reader: &mut R) -> Result<Vec<Self>, Error> {
+		super::io::read_brep(reader)
 	}
 
 	fn write_step<'a, W: std::io::Write>(solids: impl IntoIterator<Item = &'a Self>, writer: &mut W) -> Result<(), Error>
@@ -560,18 +595,11 @@ impl SolidStruct for Solid {
 		super::io::write_step(solids, writer)
 	}
 
-	fn write_brep_binary<'a, W: std::io::Write>(solids: impl IntoIterator<Item = &'a Self>, writer: &mut W) -> Result<(), Error>
+	fn write_brep<'a, W: std::io::Write>(solids: impl IntoIterator<Item = &'a Self>, writer: &mut W) -> Result<(), Error>
 	where
 		Self: 'a,
 	{
-		super::io::write_brep_binary(solids, writer)
-	}
-
-	fn write_brep_text<'a, W: std::io::Write>(solids: impl IntoIterator<Item = &'a Self>, writer: &mut W) -> Result<(), Error>
-	where
-		Self: 'a,
-	{
-		super::io::write_brep_text(solids, writer)
+		super::io::write_brep(solids, writer)
 	}
 
 	fn mesh<'a>(solids: impl IntoIterator<Item = &'a Self>, options: crate::traits::Tessellation) -> Result<crate::common::mesh::Mesh, Error>
@@ -623,7 +651,9 @@ impl SolidStruct for Solid {
 	#[cfg(feature = "color")]
 	fn color(self, color: impl Into<crate::common::color::Color>) -> Self {
 		let c = color.into();
-		let colormap = ffi::shape_faces(&self.inner).iter().map(|f| (ffi::face_tshape_id(f), c)).collect();
+		// Existing face colours are dropped: painting the whole solid is a statement
+		// about the whole solid.
+		let colormap = std::collections::HashMap::from([(ffi::shape_tshape_id(&self.inner), c)]);
 		Self::new(self.inner, colormap, self.history)
 	}
 

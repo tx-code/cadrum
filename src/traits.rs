@@ -508,11 +508,11 @@ pub trait SolidStruct: Sized + Clone + Transform {
 	fn bounding_box(&self) -> [DVec3; 2];
 
 	// --- Color ---
-	/// Paint every face of the solid with `color` (stored in the colormap and
-	/// propagated through STEP / BRep / STL / SVG I/O).
+	/// Colour the solid as a whole, dropping any per-face colours it carried: one entry
+	/// keyed by `self.id()`, which STEP and BRep keep and `Mesh` expands onto the faces.
 	#[cfg(feature = "color")]
 	fn color(self, color: impl Into<Color>) -> Self;
-	/// Drop all per-face color from this solid.
+	/// Drop this solid's colour and all of its per-face colours.
 	#[cfg(feature = "color")]
 	fn color_clear(self) -> Self;
 
@@ -694,15 +694,13 @@ pub trait SolidStruct: Sized + Clone + Transform {
 	// solids. Putting them on Solid concentrates the type's surface and keeps
 	// the crate root free of generic names like `mesh` / `write_step`.
 	fn read_step<R: std::io::Read>(reader: &mut R) -> Result<Vec<Self>, Error>;
-	fn read_brep_binary<R: std::io::Read>(reader: &mut R) -> Result<Vec<Self>, Error>;
-	fn read_brep_text<R: std::io::Read>(reader: &mut R) -> Result<Vec<Self>, Error>;
+	/// BRep is OCCT's `BinTools` binary format. The ASCII `BRepTools` flavour is not
+	/// supported — see `notes/20260714-BRep_textを捨てて前置マジックに移行.md`.
+	fn read_brep<R: std::io::Read>(reader: &mut R) -> Result<Vec<Self>, Error>;
 	fn write_step<'a, W: std::io::Write>(solids: impl IntoIterator<Item = &'a Self>, writer: &mut W) -> Result<(), Error>
 	where
 		Self: 'a;
-	fn write_brep_binary<'a, W: std::io::Write>(solids: impl IntoIterator<Item = &'a Self>, writer: &mut W) -> Result<(), Error>
-	where
-		Self: 'a;
-	fn write_brep_text<'a, W: std::io::Write>(solids: impl IntoIterator<Item = &'a Self>, writer: &mut W) -> Result<(), Error>
+	fn write_brep<'a, W: std::io::Write>(solids: impl IntoIterator<Item = &'a Self>, writer: &mut W) -> Result<(), Error>
 	where
 		Self: 'a;
 	fn mesh<'a>(solids: impl IntoIterator<Item = &'a Self>, options: Tessellation) -> Result<Mesh, Error>
