@@ -999,6 +999,44 @@ Output: [12_multiview.png](https://lzpel.github.io/cadrum/12_multiview.png) | [1
 
 
 
+#### Exact B-spline faces
+
+`BSplineSurface` carries poles, rational weights, knot multiplicities, degrees,
+and periodicity without interpolation. `Face` can construct or extract that
+payload and transport open face models through STEP or BRep:
+
+```rust,no_run
+use cadrum::{BSplineAxis, BSplineSurface, DVec3, Face};
+
+let axis = BSplineAxis {
+	degree: 3,
+	knots: vec![0.0, 1.0],
+	multiplicities: vec![4, 4],
+	periodic: false,
+};
+let surface = BSplineSurface {
+	control_points: (0..4)
+		.flat_map(|v| (0..4).map(move |u| DVec3::new(u as f64, v as f64, 0.0)))
+		.collect(),
+	weights: None,
+	u_count: 4,
+	v_count: 4,
+	u: axis.clone(),
+	v: axis,
+};
+let face = Face::from_bspline_surface(&surface)?;
+let exact = face.bspline_surface()?;
+
+let mut step = Vec::new();
+Face::write_step([&face], &mut step)?;
+let mut input = step.as_slice();
+let faces = Face::read_step(&mut input)?;
+# Ok::<(), cadrum::Error>(())
+```
+
+`Face::read_step` retains open faces. `Solid::read_step` remains the closed-body
+route and intentionally returns only solids.
+
 ## The Type Map
 
 Three concrete shape types form the whole public surface — there are no
@@ -1018,6 +1056,9 @@ needed:
 let s = Solid::cube(DVec3::ZERO, DVec3::ONE).rotate_z(0.5).translate(DVec3::X);
 let v = s.volume();
 ```
+
+`BSplineAxis` and `BSplineSurface` are geometry payloads rather than topology
+handles; they cross exact exchange boundaries without exposing OCCT objects.
 
 ## Errors
 

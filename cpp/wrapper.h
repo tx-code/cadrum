@@ -27,6 +27,7 @@ struct RustWriter;
 
 // Forward-declare shared structs (defined by cxx in ffi.rs.h)
 struct MeshData;
+struct BSplineSurfaceData;
 // ==================== Streambuf bridges ====================
 
 // std::streambuf subclass that reads from a Rust `dyn Read` via FFI callback
@@ -81,6 +82,7 @@ private:
 std::unique_ptr<TopoDS_Shape> read_step_stream(RustReader& reader);
 bool write_step_stream(const TopoDS_Shape& shape, RustWriter& writer);
 #endif
+std::unique_ptr<TopoDS_Shape> read_step_faces_stream(RustReader& reader);
 // Reads BinTools binary or BRepTools ASCII. `out_consumed` marks the end of a
 // binary payload's color-trailer boundary, or the complete ASCII input.
 std::unique_ptr<TopoDS_Shape> read_brep_stream(
@@ -230,6 +232,7 @@ void shape_bounding_box(const TopoDS_Shape& shape,
 
 std::unique_ptr<std::vector<TopoDS_Shape>> decompose_into_solids(const TopoDS_Shape& shape);
 void compound_add(TopoDS_Shape& compound, const TopoDS_Shape& child);
+void compound_add_face(TopoDS_Shape& compound, const TopoDS_Face& child);
 
 // ==================== Meshing ====================
 
@@ -453,6 +456,14 @@ bool face_project_point(const TopoDS_Face& face,
     double px, double py, double pz,
     double& cpx, double& cpy, double& cpz,
     double& nx, double& ny, double& nz);
+size_t face_boundary_loop_count(const TopoDS_Face& face);
+size_t face_outer_boundary_edge_count(const TopoDS_Face& face);
+bool face_uses_natural_surface_bounds(const TopoDS_Face& face);
+
+std::unique_ptr<TopoDS_Face> make_bspline_face(
+    const BSplineSurfaceData& data);
+
+BSplineSurfaceData face_bspline_surface(const TopoDS_Face& face);
 
 } // namespace cadrum
 

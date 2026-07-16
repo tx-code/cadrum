@@ -1,7 +1,7 @@
-//! I/O helpers for `Solid`. Exposed via `impl SolidStruct for Solid` in
-//! `super::solid` (e.g. `Solid::read_step`, `Solid::write_step`, `Solid::mesh`).
+//! I/O helpers exposed through `Solid` and `Face`.
 
 use super::compound::CompoundShape;
+use super::face::Face;
 use super::ffi;
 use super::solid::Solid;
 use super::stream::{RustReader, RustWriter};
@@ -108,6 +108,15 @@ pub(super) fn read_step<R: Read>(reader: &mut R) -> Result<Vec<Solid>, Error> {
 	}
 }
 
+pub(super) fn read_step_faces<R: Read>(reader: &mut R) -> Result<Vec<Face>, Error> {
+	let mut rust_reader = RustReader::from_ref(reader);
+	let inner = ffi::read_step_faces_stream(&mut rust_reader);
+	if inner.is_null() {
+		return Err(Error::StepReadFailed);
+	}
+	collect_faces(&inner).ok_or(Error::StepReadFailed)
+}
+
 pub(super) fn read_brep<R: Read>(reader: &mut R) -> Result<Vec<Solid>, Error> {
 	// Buffered whole because binary BRep may seek backwards to shared sub-shapes.
 	let mut buf = Vec::new();
@@ -130,6 +139,17 @@ pub(super) fn read_brep<R: Read>(reader: &mut R) -> Result<Vec<Solid>, Error> {
 	{
 		Ok(CompoundShape::from_raw(inner, Default::default()).decompose())
 	}
+}
+
+pub(super) fn read_brep_faces<R: Read>(reader: &mut R) -> Result<Vec<Face>, Error> {
+	let mut buf = Vec::new();
+	reader.read_to_end(&mut buf).map_err(|_| Error::BrepReadFailed)?;
+	let mut consumed = 0usize;
+	let inner = ffi::read_brep_stream(&buf, &mut consumed);
+	if inner.is_null() {
+		return Err(Error::BrepReadFailed);
+	}
+	collect_faces(&inner).ok_or(Error::BrepReadFailed)
 }
 
 /// Write solids to a STEP stream.
@@ -165,6 +185,28 @@ pub(super) fn write_step<'a, W: Write>(solids: impl IntoIterator<Item = &'a Soli
 	}
 }
 
+pub(super) fn write_step_faces<'a, W: Write>(faces: impl IntoIterator<Item = &'a Face>, writer: &mut W) -> Result<(), Error> {
+	let shape = compound_from_faces(faces).ok_or(Error::StepWriteFailed)?;
+	#[cfg(feature = "color")]
+	{
+		let mut rust_writer = RustWriter::from_ref(writer);
+		if ffi::write_step_color_stream(&shape, &[], &[], &mut rust_writer) {
+			Ok(())
+		} else {
+			Err(Error::StepWriteFailed)
+		}
+	}
+	#[cfg(not(feature = "color"))]
+	{
+		let mut rust_writer = RustWriter::from_ref(writer);
+		if ffi::write_step_stream(&shape, &mut rust_writer) {
+			Ok(())
+		} else {
+			Err(Error::StepWriteFailed)
+		}
+	}
+}
+
 pub(super) fn write_brep<'a, W: Write>(solids: impl IntoIterator<Item = &'a Solid>, writer: &mut W) -> Result<(), Error> {
 	let compound = CompoundShape::new(solids);
 	{
@@ -177,6 +219,32 @@ pub(super) fn write_brep<'a, W: Write>(solids: impl IntoIterator<Item = &'a Soli
 	#[cfg(feature = "color")]
 	write_color_trailer(&compound, writer)?;
 	Ok(())
+}
+
+pub(super) fn write_brep_faces<'a, W: Write>(faces: impl IntoIterator<Item = &'a Face>, writer: &mut W) -> Result<(), Error> {
+	let shape = compound_from_faces(faces).ok_or(Error::BrepWriteFailed)?;
+	let mut rust_writer = RustWriter::from_ref(writer);
+	if ffi::write_brep_stream(&shape, &mut rust_writer) {
+		Ok(())
+	} else {
+		Err(Error::BrepWriteFailed)
+	}
+}
+
+fn collect_faces(shape: &ffi::TopoDS_Shape) -> Option<Vec<Face>> {
+	let faces = ffi::shape_faces(shape);
+	let result: Vec<_> = faces.iter().map(|face| Face::new(ffi::clone_face_handle(face))).collect();
+	(!result.is_empty()).then_some(result)
+}
+
+fn compound_from_faces<'a>(faces: impl IntoIterator<Item = &'a Face>) -> Option<cxx::UniquePtr<ffi::TopoDS_Shape>> {
+	let mut shape = ffi::make_empty();
+	let mut count = 0usize;
+	for face in faces {
+		ffi::compound_add_face(shape.pin_mut(), &face.inner);
+		count += 1;
+	}
+	(count > 0).then_some(shape)
 }
 
 pub(super) fn mesh<'a>(solids: impl IntoIterator<Item = &'a Solid>, options: crate::traits::Tessellation) -> Result<crate::common::mesh::Mesh, Error> {

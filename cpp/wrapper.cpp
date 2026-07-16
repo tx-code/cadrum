@@ -11,6 +11,7 @@
 // --- Topology types & navigation ---
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
+#include <TopoDS_Wire.hxx>
 #include <TopAbs_ShapeEnum.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
@@ -86,9 +87,14 @@
 #include <GeomAPI_ProjectPointOnCurve.hxx>
 #include <Geom_BSplineCurve.hxx>
 #include <Geom_BSplineSurface.hxx>
+#include <GeomConvert.hxx>
 #include <NCollection_Array2.hxx>
 #include <NCollection_HArray1.hxx>
 #include <Precision.hxx>
+#include <TColgp_Array2OfPnt.hxx>
+#include <TColStd_Array1OfInteger.hxx>
+#include <TColStd_Array1OfReal.hxx>
+#include <TColStd_Array2OfReal.hxx>
 
 // --- I/O (BREP / STEP / progress) ---
 // STEP-specific headers are only needed by the non-color STEP path
@@ -96,11 +102,11 @@
 // through XCAF in the CADRUM_COLOR section below.
 #include <BinTools.hxx>
 #include <BRepTools.hxx>
-#ifndef CADRUM_COLOR
 #include <STEPControl_Reader.hxx>
+#ifndef CADRUM_COLOR
 #include <STEPControl_Writer.hxx>
-#include <Message_ProgressRange.hxx>
 #endif
+#include <Message_ProgressRange.hxx>
 #include <Message.hxx>
 
 // --- C++ standard library ---
@@ -231,6 +237,17 @@ bool write_step_stream(const TopoDS_Shape& shape, RustWriter& writer) {
     return step_writer.WriteStream(os) == IFSelect_RetDone;
 }
 #endif // !CADRUM_COLOR
+
+std::unique_ptr<TopoDS_Shape> read_step_faces_stream(RustReader& reader) {
+    RustReadStreambuf sbuf(reader);
+    std::istream is(&sbuf);
+    auto* step_reader = new STEPControl_Reader();
+    if (step_reader->ReadStream("stream", is) != IFSelect_RetDone) return nullptr;
+    step_reader->TransferRoots(Message_ProgressRange());
+    TopoDS_Shape shape = step_reader->OneShape();
+    if (shape.IsNull()) return nullptr;
+    return std::make_unique<TopoDS_Shape>(shape);
+}
 
 std::unique_ptr<TopoDS_Shape> read_brep_stream(
     rust::Slice<const uint8_t> data, size_t& out_consumed)
@@ -480,6 +497,11 @@ std::unique_ptr<std::vector<TopoDS_Shape>> decompose_into_solids(const TopoDS_Sh
 }
 
 void compound_add(TopoDS_Shape& compound, const TopoDS_Shape& child) {
+    BRep_Builder builder;
+    builder.Add(compound, child);
+}
+
+void compound_add_face(TopoDS_Shape& compound, const TopoDS_Face& child) {
     BRep_Builder builder;
     builder.Add(compound, child);
 }
@@ -1016,6 +1038,171 @@ bool face_project_point(const TopoDS_Face& face,
     } catch (const Standard_Failure&) {
         return false;
     }
+}
+
+size_t face_boundary_loop_count(const TopoDS_Face& face) {
+    size_t count = 0;
+    for (TopExp_Explorer explorer(face, TopAbs_WIRE); explorer.More(); explorer.Next()) ++count;
+    return count;
+}
+
+size_t face_outer_boundary_edge_count(const TopoDS_Face& face) {
+    const TopoDS_Wire wire = BRepTools::OuterWire(face);
+    if (wire.IsNull()) return 0;
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edges;
+    TopExp::MapShapes(wire, TopAbs_EDGE, edges);
+    return static_cast<size_t>(edges.Extent());
+}
+
+bool face_uses_natural_surface_bounds(const TopoDS_Face& face) {
+    try {
+        TopLoc_Location location;
+        const Handle(Geom_Surface) surface = BRep_Tool::Surface(face, location);
+        if (surface.IsNull()) return false;
+
+        double face_u_min = 0.0;
+        double face_u_max = 0.0;
+        double face_v_min = 0.0;
+        double face_v_max = 0.0;
+        BRepTools::UVBounds(face, face_u_min, face_u_max, face_v_min, face_v_max);
+
+        double surface_u_min = 0.0;
+        double surface_u_max = 0.0;
+        double surface_v_min = 0.0;
+        double surface_v_max = 0.0;
+        surface->Bounds(surface_u_min, surface_u_max, surface_v_min, surface_v_max);
+
+        const auto close = [](double left, double right) {
+            if (!std::isfinite(left) || !std::isfinite(right)) return left == right;
+            const double scale = std::max({1.0, std::abs(left), std::abs(right)});
+            return std::abs(left - right) <= Precision::PConfusion() * scale;
+        };
+        return close(face_u_min, surface_u_min)
+            && close(face_u_max, surface_u_max)
+            && close(face_v_min, surface_v_min)
+            && close(face_v_max, surface_v_max);
+    } catch (const Standard_Failure&) {
+        return false;
+    }
+}
+
+std::unique_ptr<TopoDS_Face> make_bspline_face(
+    const BSplineSurfaceData& data)
+{
+    try {
+        const auto& control_points = data.control_points;
+        const auto& weights = data.weights;
+        const auto& u_knots = data.u_knots;
+        const auto& u_multiplicities = data.u_multiplicities;
+        const auto& v_knots = data.v_knots;
+        const auto& v_multiplicities = data.v_multiplicities;
+        const uint32_t u_count = data.u_count;
+        const uint32_t v_count = data.v_count;
+        const size_t pole_count = static_cast<size_t>(u_count) * v_count;
+        if (u_count < 2 || v_count < 2 || control_points.size() != pole_count * 3) return nullptr;
+        if (!weights.empty() && weights.size() != pole_count) return nullptr;
+        if (u_knots.empty() || v_knots.empty()) return nullptr;
+        if (u_knots.size() != u_multiplicities.size() ||
+            v_knots.size() != v_multiplicities.size()) return nullptr;
+
+        TColgp_Array2OfPnt poles(1, static_cast<int>(u_count), 1, static_cast<int>(v_count));
+        for (size_t v = 0; v < v_count; ++v) {
+            for (size_t u = 0; u < u_count; ++u) {
+                const size_t index = (v * u_count + u) * 3;
+                poles.SetValue(
+                    static_cast<int>(u + 1),
+                    static_cast<int>(v + 1),
+                    gp_Pnt(control_points[index], control_points[index + 1], control_points[index + 2]));
+            }
+        }
+
+        TColStd_Array1OfReal u_knot_array(1, static_cast<int>(u_knots.size()));
+        TColStd_Array1OfReal v_knot_array(1, static_cast<int>(v_knots.size()));
+        TColStd_Array1OfInteger u_mult_array(1, static_cast<int>(u_multiplicities.size()));
+        TColStd_Array1OfInteger v_mult_array(1, static_cast<int>(v_multiplicities.size()));
+        for (size_t i = 0; i < u_knots.size(); ++i) {
+            u_knot_array.SetValue(static_cast<int>(i + 1), u_knots[i]);
+            u_mult_array.SetValue(static_cast<int>(i + 1), static_cast<int>(u_multiplicities[i]));
+        }
+        for (size_t i = 0; i < v_knots.size(); ++i) {
+            v_knot_array.SetValue(static_cast<int>(i + 1), v_knots[i]);
+            v_mult_array.SetValue(static_cast<int>(i + 1), static_cast<int>(v_multiplicities[i]));
+        }
+
+        Handle(Geom_BSplineSurface) surface;
+        if (weights.empty()) {
+            surface = new Geom_BSplineSurface(
+                poles, u_knot_array, v_knot_array, u_mult_array, v_mult_array,
+                static_cast<int>(data.u_degree), static_cast<int>(data.v_degree),
+                data.u_periodic, data.v_periodic);
+        } else {
+            TColStd_Array2OfReal weight_array(1, static_cast<int>(u_count), 1, static_cast<int>(v_count));
+            for (size_t v = 0; v < v_count; ++v) {
+                for (size_t u = 0; u < u_count; ++u) {
+                    weight_array.SetValue(static_cast<int>(u + 1), static_cast<int>(v + 1), weights[v * u_count + u]);
+                }
+            }
+            surface = new Geom_BSplineSurface(
+                poles, weight_array, u_knot_array, v_knot_array, u_mult_array, v_mult_array,
+                static_cast<int>(data.u_degree), static_cast<int>(data.v_degree),
+                data.u_periodic, data.v_periodic);
+        }
+
+        BRepBuilderAPI_MakeFace maker(surface, Precision::Confusion());
+        if (!maker.IsDone()) return nullptr;
+        return std::make_unique<TopoDS_Face>(maker.Face());
+    } catch (const Standard_Failure&) {
+        return nullptr;
+    }
+}
+
+BSplineSurfaceData face_bspline_surface(const TopoDS_Face& face) {
+    BSplineSurfaceData data{};
+    try {
+        TopLoc_Location location;
+        Handle(Geom_Surface) source = BRep_Tool::Surface(face, location);
+        if (source.IsNull()) return data;
+
+        Handle(Geom_BSplineSurface) surface = Handle(Geom_BSplineSurface)::DownCast(source);
+        if (surface.IsNull()) surface = GeomConvert::SurfaceToBSplineSurface(source);
+        if (surface.IsNull()) return data;
+
+        if (!location.IsIdentity()) {
+            Handle(Geom_Geometry) transformed = surface->Transformed(location.Transformation());
+            surface = Handle(Geom_BSplineSurface)::DownCast(transformed);
+            if (surface.IsNull()) return data;
+        }
+
+        data.u_count = static_cast<uint32_t>(surface->NbUPoles());
+        data.v_count = static_cast<uint32_t>(surface->NbVPoles());
+        data.u_degree = static_cast<uint32_t>(surface->UDegree());
+        data.v_degree = static_cast<uint32_t>(surface->VDegree());
+        data.u_periodic = surface->IsUPeriodic();
+        data.v_periodic = surface->IsVPeriodic();
+        const bool rational = surface->IsURational() || surface->IsVRational();
+
+        for (int v = 1; v <= surface->NbVPoles(); ++v) {
+            for (int u = 1; u <= surface->NbUPoles(); ++u) {
+                const gp_Pnt point = surface->Pole(u, v);
+                data.control_points.push_back(point.X());
+                data.control_points.push_back(point.Y());
+                data.control_points.push_back(point.Z());
+                if (rational) data.weights.push_back(surface->Weight(u, v));
+            }
+        }
+        for (int i = 1; i <= surface->NbUKnots(); ++i) {
+            data.u_knots.push_back(surface->UKnot(i));
+            data.u_multiplicities.push_back(static_cast<uint32_t>(surface->UMultiplicity(i)));
+        }
+        for (int i = 1; i <= surface->NbVKnots(); ++i) {
+            data.v_knots.push_back(surface->VKnot(i));
+            data.v_multiplicities.push_back(static_cast<uint32_t>(surface->VMultiplicity(i)));
+        }
+        data.success = true;
+    } catch (const Standard_Failure&) {
+        data.success = false;
+    }
+    return data;
 }
 
 // ==================== Edge Methods ====================

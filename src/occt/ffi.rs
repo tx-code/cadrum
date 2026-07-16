@@ -13,6 +13,22 @@ mod ffi_bridge {
 		success: bool,
 	}
 
+	struct BSplineSurfaceData {
+		control_points: Vec<f64>,
+		weights: Vec<f64>,
+		u_knots: Vec<f64>,
+		v_knots: Vec<f64>,
+		u_multiplicities: Vec<u32>,
+		v_multiplicities: Vec<u32>,
+		u_count: u32,
+		v_count: u32,
+		u_degree: u32,
+		v_degree: u32,
+		u_periodic: bool,
+		v_periodic: bool,
+		success: bool,
+	}
+
 	// Expose Rust stream types to C++ for streambuf callbacks
 	extern "Rust" {
 		type RustReader;
@@ -36,6 +52,7 @@ mod ffi_bridge {
 		// With color, STEP goes through XCAF (`read_step_color_stream` etc.).
 		#[cfg(not(feature = "color"))]
 		fn read_step_stream(reader: &mut RustReader) -> UniquePtr<TopoDS_Shape>;
+		fn read_step_faces_stream(reader: &mut RustReader) -> UniquePtr<TopoDS_Shape>;
 		#[cfg(not(feature = "color"))]
 		fn write_step_stream(shape: &TopoDS_Shape, writer: &mut RustWriter) -> bool;
 		// `out_consumed` = payload length, where the color trailer begins. Written only
@@ -112,6 +129,7 @@ mod ffi_bridge {
 
 		fn decompose_into_solids(shape: &TopoDS_Shape) -> UniquePtr<CxxVector<TopoDS_Shape>>;
 		fn compound_add(compound: Pin<&mut TopoDS_Shape>, child: &TopoDS_Shape);
+		fn compound_add_face(compound: Pin<&mut TopoDS_Shape>, child: &TopoDS_Face);
 
 		// ==================== Meshing ====================
 
@@ -136,6 +154,11 @@ mod ffi_bridge {
 		fn edge_is_same(left: &TopoDS_Edge, right: &TopoDS_Edge) -> bool;
 
 		fn face_project_point(face: &TopoDS_Face, px: f64, py: f64, pz: f64, cpx: &mut f64, cpy: &mut f64, cpz: &mut f64, nx: &mut f64, ny: &mut f64, nz: &mut f64) -> bool;
+		fn face_boundary_loop_count(face: &TopoDS_Face) -> usize;
+		fn face_outer_boundary_edge_count(face: &TopoDS_Face) -> usize;
+		fn face_uses_natural_surface_bounds(face: &TopoDS_Face) -> bool;
+		fn make_bspline_face(data: &BSplineSurfaceData) -> UniquePtr<TopoDS_Face>;
+		fn face_bspline_surface(face: &TopoDS_Face) -> BSplineSurfaceData;
 
 		// ==================== Edge Methods ====================
 

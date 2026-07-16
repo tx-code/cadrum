@@ -31,6 +31,7 @@ pub use traits::{BSplineEnd, ProfileOrient, Tessellation};
 pub use common::color::Color;
 pub use common::{
 	boolean::Boolean,
+	bspline::{BSplineAxis, BSplineSurface},
 	error::Error,
 	mesh::{Mesh, Scene2D, SceneOption},
 };

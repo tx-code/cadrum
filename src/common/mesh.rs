@@ -1036,6 +1036,7 @@ impl Mesh {
 
 /// Largest `{1, 2, 5} × 10^n` value ≤ `target` (round-down). Used for scale-bar
 /// length so the bar is guaranteed not to exceed the requested target size.
+#[cfg(feature = "png")]
 fn nice_step(target: f64) -> f64 {
 	if !target.is_finite() || target <= 0.0 {
 		return 1.0;
@@ -1064,6 +1065,7 @@ fn nice_step(target: f64) -> f64 {
 // 'X' と 'Y' は内部分岐があり厳密な Eulerian 一筆書きではないが、ポリライン上で中央
 // を 2 度通る (重ね描き) ことで単一列に詰めている — AA 描画では重ね描きと 1 度描きが
 // 視覚的に同一なので問題ない。'1' は base を持たず stem + flag のみで認識可能とした。
+#[cfg(feature = "png")]
 fn glyph_polyline(c: char) -> &'static [[f32; 2]] {
 	match c {
 		'0' => &[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]],
