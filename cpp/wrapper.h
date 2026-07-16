@@ -81,8 +81,8 @@ private:
 std::unique_ptr<TopoDS_Shape> read_step_stream(RustReader& reader);
 bool write_step_stream(const TopoDS_Shape& shape, RustWriter& writer);
 #endif
-// `out_consumed` = length of the BinTools payload, where Rust's color trailer
-// begins. Written ONLY on success; on failure nullptr comes back and it is untouched.
+// Reads BinTools binary or BRepTools ASCII. `out_consumed` marks the end of a
+// binary payload's color-trailer boundary, or the complete ASCII input.
 std::unique_ptr<TopoDS_Shape> read_brep_stream(
     rust::Slice<const uint8_t> data, size_t& out_consumed);
 bool write_brep_stream(const TopoDS_Shape& shape, RustWriter& writer);
@@ -441,6 +441,8 @@ std::unique_ptr<TopoDS_Shape> make_bspline_solid(
 uint64_t face_tshape_id(const TopoDS_Face& face);
 uint64_t shape_tshape_id(const TopoDS_Shape& shape);
 uint64_t edge_tshape_id(const TopoDS_Edge& edge);
+uint64_t edge_topology_hash(const TopoDS_Edge& edge);
+bool edge_is_same(const TopoDS_Edge& left, const TopoDS_Edge& right);
 
 // Project a 3D point onto `face`. Sister of `edge_project_point`.
 // Returns the closest point on the (trimmed) face surface and the outward

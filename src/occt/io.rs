@@ -109,8 +109,7 @@ pub(super) fn read_step<R: Read>(reader: &mut R) -> Result<Vec<Solid>, Error> {
 }
 
 pub(super) fn read_brep<R: Read>(reader: &mut R) -> Result<Vec<Solid>, Error> {
-	// Buffered whole: `BinTools::Read` seeks backwards to resolve shared sub-shape
-	// references, so it cannot run off a sequential stream.
+	// Buffered whole because binary BRep may seek backwards to shared sub-shapes.
 	let mut buf = Vec::new();
 	reader.read_to_end(&mut buf).map_err(|_| Error::BrepReadFailed)?;
 
@@ -213,6 +212,7 @@ pub(super) fn mesh<'a>(solids: impl IntoIterator<Item = &'a Solid>, options: cra
 	let normals: Vec<DVec3> = (0..vertex_count).map(|i| DVec3::new(data.normals[i * 3], data.normals[i * 3 + 1], data.normals[i * 3 + 2])).collect();
 	let indices: Vec<usize> = data.indices.iter().map(|&i| i as usize).collect();
 	let face_ids = data.face_tshape_ids;
+	let face_indices = data.face_indices;
 
 	// Topological edge polylines, NaN-separated. Reuses the existing edge
 	// discretizer (GCPnts_TangentialDeflection). `relative_linear` applies to
@@ -248,6 +248,7 @@ pub(super) fn mesh<'a>(solids: impl IntoIterator<Item = &'a Solid>, options: cra
 		normals,
 		indices,
 		face_ids,
+		face_indices,
 		#[cfg(feature = "color")]
 		colormap,
 		edges,

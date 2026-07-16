@@ -95,6 +95,7 @@
 // (`read_step_stream` / `write_step_stream`); with color, STEP routes
 // through XCAF in the CADRUM_COLOR section below.
 #include <BinTools.hxx>
+#include <BRepTools.hxx>
 #ifndef CADRUM_COLOR
 #include <STEPControl_Reader.hxx>
 #include <STEPControl_Writer.hxx>
@@ -234,13 +235,29 @@ bool write_step_stream(const TopoDS_Shape& shape, RustWriter& writer) {
 std::unique_ptr<TopoDS_Shape> read_brep_stream(
     rust::Slice<const uint8_t> data, size_t& out_consumed)
 {
-    // istringstream because BinTools::Read seeks backwards to shared sub-shapes.
+    const std::string payload(
+        reinterpret_cast<const char*>(data.data()), data.size());
+    const size_t first = payload.find_first_not_of(" \t\r\n");
+    size_t ascii_pos = std::string::npos;
+    if (first != std::string::npos
+        && payload.compare(first, 19, "DBRep_DrawableShape") == 0) {
+        ascii_pos = payload.find("CASCADE Topology", first + 19);
+    } else if (first != std::string::npos
+        && payload.compare(first, 16, "CASCADE Topology") == 0) {
+        ascii_pos = first;
+    }
+    const bool is_ascii = ascii_pos != std::string::npos;
     std::istringstream iss(
-        std::string(reinterpret_cast<const char*>(data.data()), data.size()));
+        is_ascii ? payload.substr(ascii_pos) : payload);
 
     auto shape = std::make_unique<TopoDS_Shape>();
     try {
-        BinTools::Read(*shape, iss);
+        if (is_ascii) {
+            BRepTools::Read(*shape, iss, BRep_Builder());
+        } else {
+            // BinTools seeks backwards to resolve shared sub-shapes.
+            BinTools::Read(*shape, iss);
+        }
     } catch (const Standard_Failure&) {
         return nullptr;  // out_consumed deliberately untouched
     }
@@ -248,10 +265,13 @@ std::unique_ptr<TopoDS_Shape> read_brep_stream(
         return nullptr;  // ditto
     }
 
-    // clear() is load-bearing: a payload read to its last byte leaves eofbit set, and
-    // tellg()'s sentry then turns that into failbit and returns -1.
-    iss.clear();
-    out_consumed = static_cast<size_t>(iss.tellg());
+    if (is_ascii) {
+        out_consumed = data.size();
+    } else {
+        // A read to the last byte leaves eofbit set; clear it before tellg().
+        iss.clear();
+        out_consumed = static_cast<size_t>(iss.tellg());
+    }
     return shape;
 }
 
@@ -794,8 +814,10 @@ MeshData mesh_shape(const TopoDS_Shape& shape, double linear, double angular, bo
 
     uint32_t global_vertex_offset = 0;
 
-    for (TopExp_Explorer explorer(shape, TopAbs_FACE); explorer.More(); explorer.Next()) {
-        TopoDS_Face face = TopoDS::Face(explorer.Current());
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faceMap;
+    TopExp::MapShapes(shape, TopAbs_FACE, faceMap);
+    for (int face_index = 1; face_index <= faceMap.Extent(); face_index++) {
+        TopoDS_Face face = TopoDS::Face(faceMap(face_index));
         TopLoc_Location location;
         Handle(Poly_Triangulation) triangulation = BRep_Tool::Triangulation(face, location);
 
@@ -858,6 +880,7 @@ MeshData mesh_shape(const TopoDS_Shape& shape, double linear, double angular, bo
                 result.indices.push_back(global_vertex_offset + n3 - 1);
             }
             result.face_tshape_ids.push_back(face_id);
+            result.face_indices.push_back(static_cast<uint32_t>(face_index - 1));
         }
 
         global_vertex_offset += nb_nodes;
@@ -883,10 +906,12 @@ std::unique_ptr<std::vector<TopoDS_Edge>> shape_edges(const TopoDS_Shape& shape)
 }
 
 std::unique_ptr<std::vector<TopoDS_Face>> shape_faces(const TopoDS_Shape& shape) {
-    // Faces in a valid shape are already unique under TopExp_Explorer.
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faceMap;
+    TopExp::MapShapes(shape, TopAbs_FACE, faceMap);
     auto out = std::make_unique<std::vector<TopoDS_Face>>();
-    for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next()) {
-        out->push_back(TopoDS::Face(ex.Current()));
+    out->reserve(faceMap.Extent());
+    for (int i = 1; i <= faceMap.Extent(); i++) {
+        out->push_back(TopoDS::Face(faceMap(i)));
     }
     return out;
 }
@@ -928,6 +953,14 @@ uint64_t shape_tshape_id(const TopoDS_Shape& shape) {
 
 uint64_t edge_tshape_id(const TopoDS_Edge& edge) {
     return reinterpret_cast<uint64_t>(edge.TShape().get());
+}
+
+uint64_t edge_topology_hash(const TopoDS_Edge& edge) {
+    return static_cast<uint64_t>(TopTools_ShapeMapHasher{}(edge));
+}
+
+bool edge_is_same(const TopoDS_Edge& left, const TopoDS_Edge& right) {
+    return left.IsSame(right);
 }
 
 bool face_project_point(const TopoDS_Face& face,

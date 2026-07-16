@@ -313,6 +313,11 @@ pub trait EdgeStruct: Sized + Clone + Transform {
 	/// Use to compare edges across `Solid::iter_edge()` / `Face::iter_edge()`
 	/// (e.g. `face.iter_edge().any(|e| e.id() == edge.id())`).
 	fn id(&self) -> u64;
+	/// Hash for the exact TShape + location occurrence. Resolve collisions with
+	/// `is_same`; unlike `id`, placed instances do not collapse.
+	fn topology_hash(&self) -> u64;
+	/// Exact OCCT `IsSame` comparison: TShape and location, ignoring orientation.
+	fn is_same(&self, other: &Self) -> bool;
 
 	// --- Per-edge queries ---
 	/// Start point of the edge (evaluated at the curve's first parameter).
@@ -695,8 +700,7 @@ pub trait SolidStruct: Sized + Clone + Transform {
 	// solids. Putting them on Solid concentrates the type's surface and keeps
 	// the crate root free of generic names like `mesh` / `write_step`.
 	fn read_step<R: std::io::Read>(reader: &mut R) -> Result<Vec<Self>, Error>;
-	/// BRep is OCCT's `BinTools` binary format. The ASCII `BRepTools` flavour is not
-	/// supported — see `notes/20260714-BRep_textを捨てて前置マジックに移行.md`.
+	/// Reads OCCT `BinTools` binary or `BRepTools` ASCII BRep data.
 	fn read_brep<R: std::io::Read>(reader: &mut R) -> Result<Vec<Self>, Error>;
 	fn write_step<'a, W: std::io::Write>(solids: impl IntoIterator<Item = &'a Self>, writer: &mut W) -> Result<(), Error>
 	where

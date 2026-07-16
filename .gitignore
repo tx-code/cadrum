@@ -4,6 +4,7 @@ logs/
 linkedin.md
 .venv/
 *.brep
+!tests/fixtures/*.brep
 *.log
 *.step
 *.stl

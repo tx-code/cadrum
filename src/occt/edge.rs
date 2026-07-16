@@ -38,6 +38,14 @@ impl EdgeStruct for Edge {
 		ffi::edge_tshape_id(&self.inner)
 	}
 
+	fn topology_hash(&self) -> u64 {
+		ffi::edge_topology_hash(&self.inner)
+	}
+
+	fn is_same(&self, other: &Self) -> bool {
+		ffi::edge_is_same(&self.inner, &other.inner)
+	}
+
 	// ==================== Per-edge queries ====================
 
 	fn start_point(&self) -> DVec3 {

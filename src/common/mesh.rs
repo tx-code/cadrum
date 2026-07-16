@@ -19,6 +19,9 @@ pub struct Mesh {
 	pub indices: Vec<usize>,
 	/// Per-triangle face ID. Length equals `indices.len() / 3`.
 	pub face_ids: Vec<u64>,
+	/// Per-triangle index into the meshed shape's unique face enumeration.
+	/// Length equals `indices.len() / 3`.
+	pub face_indices: Vec<u32>,
 	/// Per-face color map (face_id → Color).
 	#[cfg(feature = "color")]
 	pub colormap: HashMap<u64, Color>,

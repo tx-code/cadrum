@@ -50,6 +50,12 @@ impl Edge {
 	pub fn id(&self) -> u64 {
 		<Self as crate::traits::EdgeStruct>::id(self)
 	}
+	pub fn topology_hash(&self) -> u64 {
+		<Self as crate::traits::EdgeStruct>::topology_hash(self)
+	}
+	pub fn is_same(&self, other: &crate::Edge) -> bool {
+		<Self as crate::traits::EdgeStruct>::is_same(self, other)
+	}
 	pub fn start_point(&self) -> DVec3 {
 		<Self as crate::traits::EdgeStruct>::start_point(self)
 	}

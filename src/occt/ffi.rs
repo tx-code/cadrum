@@ -9,6 +9,7 @@ mod ffi_bridge {
 		normals: Vec<f64>,  // flat xyz, one per vertex
 		indices: Vec<u32>,
 		face_tshape_ids: Vec<u64>, // per-triangle TShape* address
+		face_indices: Vec<u32>,    // per-triangle index in shape_faces()
 		success: bool,
 	}
 
@@ -131,6 +132,8 @@ mod ffi_bridge {
 		fn face_tshape_id(face: &TopoDS_Face) -> u64;
 		fn shape_tshape_id(shape: &TopoDS_Shape) -> u64;
 		fn edge_tshape_id(edge: &TopoDS_Edge) -> u64;
+		fn edge_topology_hash(edge: &TopoDS_Edge) -> u64;
+		fn edge_is_same(left: &TopoDS_Edge, right: &TopoDS_Edge) -> bool;
 
 		fn face_project_point(face: &TopoDS_Face, px: f64, py: f64, pz: f64, cpx: &mut f64, cpy: &mut f64, cpz: &mut f64, nx: &mut f64, ny: &mut f64, nz: &mut f64) -> bool;
 
