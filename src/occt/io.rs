@@ -1,5 +1,6 @@
 //! I/O helpers exposed through `Solid` and `Face`.
 
+use super::body::BrepBody;
 use super::compound::CompoundShape;
 use super::face::Face;
 use super::ffi;
@@ -151,6 +152,42 @@ pub(super) fn read_brep<R: Read>(reader: &mut R) -> Result<Vec<Solid>, Error> {
 	{
 		Ok(CompoundShape::from_raw(inner, Default::default()).decompose())
 	}
+}
+
+pub(super) fn read_brep_bodies<R: Read>(reader: &mut R) -> Result<Vec<BrepBody>, Error> {
+	let mut buf = Vec::new();
+	reader.read_to_end(&mut buf).map_err(|_| Error::BrepReadFailed)?;
+	let mut consumed = 0usize;
+	let inner = ffi::read_brep_stream(&buf, &mut consumed);
+	if inner.is_null() {
+		return Err(Error::BrepReadFailed);
+	}
+
+	#[cfg(feature = "color")]
+	let colormap: std::collections::HashMap<u64, Color> = {
+		let ids = trailer_ids(&inner);
+		read_color_trailer(buf.get(consumed..).unwrap_or_default()).into_iter().filter_map(|(index, color)| ids.get(index as usize).map(|&id| (id, color))).collect()
+	};
+
+	let bodies = ffi::decompose_into_brep_bodies(&inner);
+	let result = bodies
+		.iter()
+		.filter_map(|shape| {
+			if ffi::shape_is_solid(shape) {
+				Some(BrepBody::Solid(Solid::new(
+					ffi::clone_shape_handle(shape),
+					#[cfg(feature = "color")]
+					colormap.clone(),
+					Default::default(),
+				)))
+			} else if ffi::shape_is_shell(shape) {
+				Some(BrepBody::Shell(Shell::new(ffi::clone_shape_handle(shape))))
+			} else {
+				None
+			}
+		})
+		.collect::<Vec<_>>();
+	(!result.is_empty()).then_some(result).ok_or(Error::BrepReadFailed)
 }
 
 pub(super) fn read_brep_faces<R: Read>(reader: &mut R) -> Result<Vec<Face>, Error> {
@@ -374,4 +411,37 @@ fn mesh_shape(shape: &ffi::TopoDS_Shape, options: crate::traits::Tessellation) -
 		colormap: std::collections::HashMap::new(),
 		edges,
 	})
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::DVec3;
+
+	#[test]
+	fn body_reader_keeps_free_shells_beside_solids_without_nested_duplicates() {
+		let solid = Solid::cube(DVec3::ZERO, DVec3::ONE);
+		let shell_source = Solid::cube(DVec3::splat(3.0), DVec3::splat(4.0));
+		let shell = Shell::sew(shell_source.iter_face().take(5), 1.0e-7).expect("open shell");
+		let mut compound = ffi::make_empty();
+		ffi::compound_add(compound.pin_mut(), solid.inner());
+		ffi::compound_add(compound.pin_mut(), shell.inner());
+
+		let mut payload = Vec::new();
+		let mut writer = RustWriter::from_ref(&mut payload);
+		assert!(ffi::write_brep_stream(&compound, &mut writer));
+		let bodies = read_brep_bodies(&mut payload.as_slice()).expect("mixed BRep bodies");
+
+		assert_eq!(bodies.len(), 2);
+		assert_eq!(bodies.iter().filter(|body| matches!(body, BrepBody::Solid(_))).count(), 1);
+		assert_eq!(bodies.iter().filter(|body| matches!(body, BrepBody::Shell(_))).count(), 1);
+		let shell = bodies
+			.iter()
+			.find_map(|body| match body {
+				BrepBody::Shell(shell) => Some(shell),
+				BrepBody::Solid(_) => None,
+			})
+			.expect("free shell");
+		assert!(!shell.is_closed());
+	}
 }

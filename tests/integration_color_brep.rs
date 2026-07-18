@@ -2,7 +2,7 @@
 
 #![cfg(feature = "color")]
 
-use cadrum::{Color, Solid};
+use cadrum::{BrepBody, Color, Solid};
 use glam::DVec3;
 use std::fs;
 
@@ -84,4 +84,18 @@ fn trailer_begins_where_the_payload_ends() {
 #[test]
 fn empty_input_fails() {
 	assert!(cadrum::Solid::read_brep(&mut [].as_slice()).is_err(), "empty input should fail to parse");
+}
+
+#[test]
+fn body_reader_preserves_solid_color_trailer() {
+	let red = Color::from_str("#ff0000").expect("valid hex");
+	let cube = Solid::cube(DVec3::ZERO, DVec3::ONE).color(red);
+	let mut brep = Vec::new();
+	Solid::write_brep([&cube], &mut brep).expect("write colored BRep");
+	let bodies = BrepBody::read_brep(&mut brep.as_slice()).expect("read colored BRep body");
+
+	let [BrepBody::Solid(solid)] = bodies.as_slice() else {
+		panic!("colored solid body classification changed");
+	};
+	assert_eq!(solid.colormap().get(&solid.id()), Some(&red));
 }

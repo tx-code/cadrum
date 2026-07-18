@@ -236,6 +236,7 @@ void shape_bounding_box(const TopoDS_Shape& shape,
 
 std::unique_ptr<std::vector<TopoDS_Shape>> decompose_into_solids(const TopoDS_Shape& shape);
 std::unique_ptr<std::vector<TopoDS_Shape>> decompose_into_shells(const TopoDS_Shape& shape);
+std::unique_ptr<std::vector<TopoDS_Shape>> decompose_into_brep_bodies(const TopoDS_Shape& shape);
 void compound_add(TopoDS_Shape& compound, const TopoDS_Shape& child);
 void compound_add_face(TopoDS_Shape& compound, const TopoDS_Face& child);
 

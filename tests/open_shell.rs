@@ -1,4 +1,4 @@
-use cadrum::{DVec3, Shell, Solid};
+use cadrum::{BrepBody, DVec3, Shell, Solid};
 
 #[test]
 fn sewing_five_cube_faces_builds_a_valid_open_shell() {
@@ -36,6 +36,33 @@ fn shell_brep_roundtrip_preserves_open_topology() {
 	assert!(!shells[0].is_closed());
 	assert_eq!(shells[0].boundary_edge_count(), 4);
 	assert_eq!(shells[0].iter_face().count(), 5);
+}
+
+#[test]
+fn brep_body_reader_preserves_open_shell_classification() {
+	let cube = Solid::cube(DVec3::ZERO, DVec3::ONE);
+	let shell = Shell::sew(cube.iter_face().take(5), 1.0e-7).expect("open shell sewing");
+	let mut brep = Vec::new();
+	Shell::write_brep([&shell], &mut brep).expect("shell BRep write");
+	let bodies = BrepBody::read_brep(&mut std::io::Cursor::new(brep)).expect("BRep body read");
+
+	assert_eq!(bodies.len(), 1);
+	let BrepBody::Shell(shell) = &bodies[0] else {
+		panic!("open shell was promoted to a solid");
+	};
+	assert!(shell.is_valid());
+	assert!(!shell.is_closed());
+}
+
+#[test]
+fn brep_body_reader_preserves_solid_classification() {
+	let solid = Solid::cube(DVec3::ZERO, DVec3::ONE);
+	let mut brep = Vec::new();
+	Solid::write_brep([&solid], &mut brep).expect("solid BRep write");
+	let bodies = BrepBody::read_brep(&mut std::io::Cursor::new(brep)).expect("BRep body read");
+
+	assert_eq!(bodies.len(), 1);
+	assert!(matches!(bodies[0], BrepBody::Solid(_)));
 }
 
 #[test]

@@ -498,6 +498,24 @@ std::unique_ptr<std::vector<TopoDS_Shape>> decompose_into_solids(const TopoDS_Sh
     return result;
 }
 
+std::unique_ptr<std::vector<TopoDS_Shape>> decompose_into_brep_bodies(const TopoDS_Shape& shape) {
+    auto result = std::make_unique<std::vector<TopoDS_Shape>>();
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> solid_shells;
+    for (TopExp_Explorer solids(shape, TopAbs_SOLID); solids.More(); solids.Next()) {
+        const TopoDS_Shape& solid = solids.Current();
+        result->push_back(solid);
+        for (TopExp_Explorer shells(solid, TopAbs_SHELL); shells.More(); shells.Next()) {
+            solid_shells.Add(shells.Current());
+        }
+    }
+    for (TopExp_Explorer shells(shape, TopAbs_SHELL); shells.More(); shells.Next()) {
+        if (!solid_shells.Contains(shells.Current())) {
+            result->push_back(shells.Current());
+        }
+    }
+    return result;
+}
+
 void compound_add(TopoDS_Shape& compound, const TopoDS_Shape& child) {
     BRep_Builder builder;
     builder.Add(compound, child);

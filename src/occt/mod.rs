@@ -1,3 +1,4 @@
+pub mod body;
 pub(crate) mod compound;
 pub mod edge;
 pub mod face;

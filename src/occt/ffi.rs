@@ -133,6 +133,7 @@ mod ffi_bridge {
 
 		fn decompose_into_solids(shape: &TopoDS_Shape) -> UniquePtr<CxxVector<TopoDS_Shape>>;
 		fn decompose_into_shells(shape: &TopoDS_Shape) -> UniquePtr<CxxVector<TopoDS_Shape>>;
+		fn decompose_into_brep_bodies(shape: &TopoDS_Shape) -> UniquePtr<CxxVector<TopoDS_Shape>>;
 		fn compound_add(compound: Pin<&mut TopoDS_Shape>, child: &TopoDS_Shape);
 		fn compound_add_face(compound: Pin<&mut TopoDS_Shape>, child: &TopoDS_Face);
 
