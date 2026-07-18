@@ -118,6 +118,10 @@ mod ffi_bridge {
 
 		fn shape_is_null(shape: &TopoDS_Shape) -> bool;
 		fn shape_is_solid(shape: &TopoDS_Shape) -> bool;
+		fn shape_is_shell(shape: &TopoDS_Shape) -> bool;
+		fn shape_is_valid(shape: &TopoDS_Shape) -> bool;
+		fn shell_is_closed(shape: &TopoDS_Shape) -> bool;
+		fn shell_boundary_edge_count(shape: &TopoDS_Shape) -> usize;
 		fn shape_volume(shape: &TopoDS_Shape) -> f64;
 		fn shape_surface_area(shape: &TopoDS_Shape) -> f64;
 		fn shape_center_of_mass(shape: &TopoDS_Shape, x: &mut f64, y: &mut f64, z: &mut f64);
@@ -128,6 +132,7 @@ mod ffi_bridge {
 		// ==================== Compound Decompose/Compose ====================
 
 		fn decompose_into_solids(shape: &TopoDS_Shape) -> UniquePtr<CxxVector<TopoDS_Shape>>;
+		fn decompose_into_shells(shape: &TopoDS_Shape) -> UniquePtr<CxxVector<TopoDS_Shape>>;
 		fn compound_add(compound: Pin<&mut TopoDS_Shape>, child: &TopoDS_Shape);
 		fn compound_add_face(compound: Pin<&mut TopoDS_Shape>, child: &TopoDS_Face);
 
@@ -187,6 +192,7 @@ mod ffi_bridge {
 		fn make_pipe_shell(all_edges: &CxxVector<TopoDS_Edge>, spine_edges: &CxxVector<TopoDS_Edge>, orient: u32, ux: f64, uy: f64, uz: f64, aux_spine_edges: &CxxVector<TopoDS_Edge>) -> UniquePtr<TopoDS_Shape>;
 		fn make_loft(all_edges: &CxxVector<TopoDS_Edge>, ruled: bool) -> UniquePtr<TopoDS_Shape>;
 		fn make_sewn_solid(faces: &CxxVector<TopoDS_Face>, tolerance: f64) -> UniquePtr<TopoDS_Shape>;
+		fn make_sewn_shell(faces: &CxxVector<TopoDS_Face>, tolerance: f64) -> UniquePtr<TopoDS_Shape>;
 		fn make_offset_shape(shape: &TopoDS_Shape, offset: f64, tolerance: f64) -> UniquePtr<TopoDS_Shape>;
 		fn make_bspline_solid(coords: &[f64], nu: u32, nv: u32, u_periodic: bool) -> UniquePtr<TopoDS_Shape>;
 

@@ -215,6 +215,10 @@ std::unique_ptr<TopoDS_Shape> transform_mirror(
 
 bool shape_is_null(const TopoDS_Shape& shape);
 bool shape_is_solid(const TopoDS_Shape& shape);
+bool shape_is_shell(const TopoDS_Shape& shape);
+bool shape_is_valid(const TopoDS_Shape& shape);
+bool shell_is_closed(const TopoDS_Shape& shape);
+std::size_t shell_boundary_edge_count(const TopoDS_Shape& shape);
 double shape_volume(const TopoDS_Shape& shape);
 double shape_surface_area(const TopoDS_Shape& shape);
 void shape_center_of_mass(const TopoDS_Shape& shape,
@@ -231,6 +235,7 @@ void shape_bounding_box(const TopoDS_Shape& shape,
 // ==================== Compound Decompose/Compose ====================
 
 std::unique_ptr<std::vector<TopoDS_Shape>> decompose_into_solids(const TopoDS_Shape& shape);
+std::unique_ptr<std::vector<TopoDS_Shape>> decompose_into_shells(const TopoDS_Shape& shape);
 void compound_add(TopoDS_Shape& compound, const TopoDS_Shape& child);
 void compound_add_face(TopoDS_Shape& compound, const TopoDS_Face& child);
 
@@ -411,6 +416,9 @@ std::unique_ptr<TopoDS_Shape> make_loft(
 // oriented with BRepLib::OrientClosedSolid so the enclosed volume is
 // positive regardless of input face orientation.
 std::unique_ptr<TopoDS_Shape> make_sewn_solid(
+    const std::vector<TopoDS_Face>& faces,
+    double tolerance);
+std::unique_ptr<TopoDS_Shape> make_sewn_shell(
     const std::vector<TopoDS_Face>& faces,
     double tolerance);
 

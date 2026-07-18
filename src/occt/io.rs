@@ -3,6 +3,7 @@
 use super::compound::CompoundShape;
 use super::face::Face;
 use super::ffi;
+use super::shell::Shell;
 use super::solid::Solid;
 use super::stream::{RustReader, RustWriter};
 use crate::common::error::Error;
@@ -152,6 +153,19 @@ pub(super) fn read_brep_faces<R: Read>(reader: &mut R) -> Result<Vec<Face>, Erro
 	collect_faces(&inner).ok_or(Error::BrepReadFailed)
 }
 
+pub(super) fn read_brep_shells<R: Read>(reader: &mut R) -> Result<Vec<Shell>, Error> {
+	let mut buf = Vec::new();
+	reader.read_to_end(&mut buf).map_err(|_| Error::BrepReadFailed)?;
+	let mut consumed = 0usize;
+	let inner = ffi::read_brep_stream(&buf, &mut consumed);
+	if inner.is_null() {
+		return Err(Error::BrepReadFailed);
+	}
+	let shells = ffi::decompose_into_shells(&inner);
+	let result: Vec<_> = shells.iter().map(|shell| Shell::new(ffi::clone_shape_handle(shell))).collect();
+	(!result.is_empty()).then_some(result).ok_or(Error::BrepReadFailed)
+}
+
 /// Write solids to a STEP stream.
 ///
 /// With the `color` feature enabled, face colors are automatically embedded
@@ -223,6 +237,24 @@ pub(super) fn write_brep<'a, W: Write>(solids: impl IntoIterator<Item = &'a Soli
 
 pub(super) fn write_brep_faces<'a, W: Write>(faces: impl IntoIterator<Item = &'a Face>, writer: &mut W) -> Result<(), Error> {
 	let shape = compound_from_faces(faces).ok_or(Error::BrepWriteFailed)?;
+	let mut rust_writer = RustWriter::from_ref(writer);
+	if ffi::write_brep_stream(&shape, &mut rust_writer) {
+		Ok(())
+	} else {
+		Err(Error::BrepWriteFailed)
+	}
+}
+
+pub(super) fn write_brep_shells<'a, W: Write>(shells: impl IntoIterator<Item = &'a Shell>, writer: &mut W) -> Result<(), Error> {
+	let mut shape = ffi::make_empty();
+	let mut count = 0usize;
+	for shell in shells {
+		ffi::compound_add(shape.pin_mut(), shell.inner());
+		count += 1;
+	}
+	if count == 0 {
+		return Err(Error::BrepWriteFailed);
+	}
 	let mut rust_writer = RustWriter::from_ref(writer);
 	if ffi::write_brep_stream(&shape, &mut rust_writer) {
 		Ok(())

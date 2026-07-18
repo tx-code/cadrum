@@ -59,10 +59,8 @@ pub enum Error {
 	/// The string identifies which precondition or stage failed.
 	LoftFailed(String),
 
-	/// Sewing (`Solid::sew` / `BRepBuilderAPI_Sewing`) failed: the faces do
-	/// not form exactly one closed shell within the given tolerance (gaps,
-	/// overlaps, multiple disconnected shells, or stray faces). The string
-	/// identifies which precondition or stage failed.
+	/// Sewing (`Shell::sew` or `Solid::sew`) failed because the faces do not
+	/// form the required single connected shell within the given tolerance.
 	SewFailed(String),
 
 	/// Surface offset (`Solid::offset_surface` / `BRepOffsetAPI_MakeOffsetShape`)

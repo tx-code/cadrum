@@ -17,6 +17,7 @@
 #include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
 #include <NCollection_IndexedMap.hxx>
+#include <NCollection_IndexedDataMap.hxx>
 #include <NCollection_List.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
 
@@ -44,6 +45,7 @@
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
+#include <BRepCheck_Analyzer.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepExtrema_ExtPF.hxx>
 #include <BRepLProp_SLProps.hxx>
@@ -759,6 +761,40 @@ bool shape_is_null(const TopoDS_Shape& shape) {
 
 bool shape_is_solid(const TopoDS_Shape& shape) {
     return !shape.IsNull() && shape.ShapeType() == TopAbs_SOLID;
+}
+
+std::unique_ptr<std::vector<TopoDS_Shape>> decompose_into_shells(const TopoDS_Shape& shape) {
+    auto result = std::make_unique<std::vector<TopoDS_Shape>>();
+    for (TopExp_Explorer ex(shape, TopAbs_SHELL); ex.More(); ex.Next()) {
+        result->push_back(ex.Current());
+    }
+    return result;
+}
+
+bool shape_is_shell(const TopoDS_Shape& shape) {
+    return !shape.IsNull() && shape.ShapeType() == TopAbs_SHELL;
+}
+
+bool shape_is_valid(const TopoDS_Shape& shape) {
+    return !shape.IsNull() && BRepCheck_Analyzer(shape).IsValid();
+}
+
+bool shell_is_closed(const TopoDS_Shape& shape) {
+    return shape_is_shell(shape) && BRep_Tool::IsClosed(TopoDS::Shell(shape));
+}
+
+std::size_t shell_boundary_edge_count(const TopoDS_Shape& shape) {
+    if (!shape_is_shell(shape)) return 0;
+    NCollection_IndexedDataMap<
+        TopoDS_Shape,
+        NCollection_List<TopoDS_Shape>,
+        TopTools_ShapeMapHasher> edge_faces;
+    TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edge_faces);
+    std::size_t count = 0;
+    for (int index = 1; index <= edge_faces.Extent(); ++index) {
+        if (edge_faces(index).Extent() == 1) ++count;
+    }
+    return count;
 }
 
 double shape_volume(const TopoDS_Shape& shape) {
@@ -1981,6 +2017,42 @@ std::unique_ptr<TopoDS_Shape> make_sewn_solid(
         TopoDS_Solid solid = solid_maker.Solid();
         BRepLib::OrientClosedSolid(solid);
         return std::make_unique<TopoDS_Shape>(solid);
+    } catch (const Standard_Failure&) {
+        return nullptr;
+    }
+}
+
+std::unique_ptr<TopoDS_Shape> make_sewn_shell(
+    const std::vector<TopoDS_Face>& faces,
+    double tolerance)
+{
+    try {
+        if (faces.empty() || !std::isfinite(tolerance) || tolerance <= 0.0) {
+            return nullptr;
+        }
+        BRepBuilderAPI_Sewing sewing(tolerance);
+        for (const auto& face : faces) sewing.Add(face);
+        sewing.Perform();
+        const TopoDS_Shape& sewn = sewing.SewedShape();
+        if (sewn.IsNull()) return nullptr;
+
+        if (sewn.ShapeType() == TopAbs_FACE && faces.size() == 1) {
+            BRep_Builder builder;
+            TopoDS_Shell shell;
+            builder.MakeShell(shell);
+            builder.Add(shell, TopoDS::Face(sewn));
+            return std::make_unique<TopoDS_Shape>(shell);
+        }
+
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> shells;
+        TopExp::MapShapes(sewn, TopAbs_SHELL, shells);
+        if (shells.Extent() != 1) return nullptr;
+        const TopoDS_Shape& shell = shells(1);
+
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> shell_faces;
+        TopExp::MapShapes(shell, TopAbs_FACE, shell_faces);
+        if (shell_faces.Extent() != static_cast<int>(faces.size())) return nullptr;
+        return std::make_unique<TopoDS_Shape>(shell);
     } catch (const Standard_Failure&) {
         return nullptr;
     }

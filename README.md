@@ -121,12 +121,12 @@ C++17 compiler (GCC, Clang, or MSVC) and CMake.
 |---|---|
 | **Primitives** | `Solid::cube`, `Solid::sphere`, `Solid::cylinder`, `Solid::cone`, `Solid::torus`, `Solid::half_space` |
 | **Curves** | `Edge::line`, `Edge::arc_3pts`, `Edge::circle`, `Edge::polygon`, `Edge::helix`, `Edge::bspline` |
-| **Surfacing** | `Solid::extrude`, `Solid::sweep`, `Solid::loft`, `Solid::bspline` |
+| **Surfacing** | `Solid::extrude`, `Solid::sweep`, `Solid::loft`, `Solid::bspline`, `Shell::sew` |
 | **Editing** | `Solid::shell`, `Solid::fillet_edges`, `Solid::chamfer_edges`, `Solid::clean` |
 | **Queries** | `Solid::volume`, `Solid::area`, `Solid::center`, `Solid::inertia`, `Solid::bounding_box`, `Solid::contains` |
-| **Topology** | `Solid::iter_face`, `Solid::iter_edge`, `Face::iter_edge`, `Face::project`, `Edge::project` |
+| **Topology** | `Solid::iter_face`, `Solid::iter_edge`, `Shell::iter_face`, `Shell::iter_edge`, `Shell::is_closed`, `Shell::is_valid`, `Shell::boundary_edge_count`, `Face::iter_edge`, `Face::project`, `Edge::project` |
 | **Identity / history** | `Solid::id`, `Face::id`, `Edge::id`, `Solid::iter_history` |
-| **I/O** | `Solid::read_step` / `Solid::write_step`, `Solid::read_brep` / `Solid::write_brep` (BRep = OCCT's `BinTools` binary format) |
+| **I/O** | `Solid::read_step` / `Solid::write_step`, `Solid::read_brep` / `Solid::write_brep`, `Shell::read_brep` / `Shell::write_brep` (BRep = OCCT's `BinTools` binary format) |
 | **Mesh** | `Solid::mesh` → `Mesh`, `Mesh::write_stl`, `Mesh::write_gltf_binary`, `Mesh::scene` → `Scene2D`, `Scene2D::write_svg`, `Scene2D::write_png` *(png)*, `Solid::write_multiview_png` *(png)* |
 | **Color** *(feature `color`)* | per-face and per-solid color preserved across STEP / BRep / STL / glTF / SVG round-trips |
 
@@ -1035,16 +1035,19 @@ let faces = Face::read_step(&mut input)?;
 ```
 
 `Face::read_step` retains open faces. `Solid::read_step` remains the closed-body
-route and intentionally returns only solids.
+route and intentionally returns only solids. `Shell::sew` joins a complete face
+set into one connected open or closed shell; it exposes closure, validity, and
+boundary-edge diagnostics and preserves shell topology through BRep I/O.
 
 ## The Type Map
 
-Three concrete shape types form the whole public surface — there are no
+Four concrete shape types form the whole public surface — there are no
 collection wrapper traits:
 
 ```text
     Edge  ── single 3D curve         ┐
     Face  ── trimmed 3D surface      │ concrete BRep handles
+    Shell ── connected face topology │
     Solid ── connected closed body   ┘
 ```
 
