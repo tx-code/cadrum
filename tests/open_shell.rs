@@ -39,6 +39,20 @@ fn shell_brep_roundtrip_preserves_open_topology() {
 }
 
 #[test]
+fn open_shell_mesh_preserves_face_mapping_and_boundary_wire() {
+	let cube = Solid::cube(DVec3::ZERO, DVec3::ONE);
+	let shell = Shell::sew(cube.iter_face().take(5), 1.0e-7).expect("open shell sewing");
+	let mesh = Shell::mesh([&shell], Default::default()).expect("open shell mesh");
+
+	assert!(!mesh.vertices.is_empty());
+	assert!(!mesh.indices.is_empty());
+	assert_eq!(mesh.face_indices.len(), mesh.indices.len() / 3);
+	assert!(mesh.face_indices.iter().all(|&face| face < 5));
+	assert_eq!(mesh.face_indices.iter().copied().max(), Some(4));
+	assert!(!mesh.edges.is_empty());
+}
+
+#[test]
 fn disconnected_faces_do_not_fabricate_one_shell() {
 	let left = Solid::cube(DVec3::ZERO, DVec3::ONE);
 	let right = Solid::cube(DVec3::splat(3.0), DVec3::splat(4.0));

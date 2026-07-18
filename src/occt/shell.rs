@@ -71,4 +71,8 @@ impl Shell {
 	pub fn write_brep<'a, W: Write>(shells: impl IntoIterator<Item = &'a Self>, writer: &mut W) -> Result<(), Error> {
 		io::write_brep_shells(shells, writer)
 	}
+
+	pub fn mesh<'a>(shells: impl IntoIterator<Item = &'a Self>, options: crate::Tessellation) -> Result<crate::Mesh, Error> {
+		io::mesh_shells(shells, options)
+	}
 }

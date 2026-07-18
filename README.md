@@ -127,7 +127,7 @@ C++17 compiler (GCC, Clang, or MSVC) and CMake.
 | **Topology** | `Solid::iter_face`, `Solid::iter_edge`, `Shell::iter_face`, `Shell::iter_edge`, `Shell::is_closed`, `Shell::is_valid`, `Shell::boundary_edge_count`, `Face::iter_edge`, `Face::project`, `Edge::project` |
 | **Identity / history** | `Solid::id`, `Face::id`, `Edge::id`, `Solid::iter_history` |
 | **I/O** | `Solid::read_step` / `Solid::write_step`, `Solid::read_brep` / `Solid::write_brep`, `Shell::read_brep` / `Shell::write_brep` (BRep = OCCT's `BinTools` binary format) |
-| **Mesh** | `Solid::mesh` → `Mesh`, `Mesh::write_stl`, `Mesh::write_gltf_binary`, `Mesh::scene` → `Scene2D`, `Scene2D::write_svg`, `Scene2D::write_png` *(png)*, `Solid::write_multiview_png` *(png)* |
+| **Mesh** | `Solid::mesh` / `Shell::mesh` → `Mesh`, `Mesh::write_stl`, `Mesh::write_gltf_binary`, `Mesh::scene` → `Scene2D`, `Scene2D::write_svg`, `Scene2D::write_png` *(png)*, `Solid::write_multiview_png` *(png)* |
 | **Color** *(feature `color`)* | per-face and per-solid color preserved across STEP / BRep / STL / glTF / SVG round-trips |
 
 ## Features

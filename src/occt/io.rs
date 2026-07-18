@@ -259,15 +259,7 @@ pub(super) fn write_brep_faces<'a, W: Write>(faces: impl IntoIterator<Item = &'a
 }
 
 pub(super) fn write_brep_shells<'a, W: Write>(shells: impl IntoIterator<Item = &'a Shell>, writer: &mut W) -> Result<(), Error> {
-	let mut shape = ffi::make_empty();
-	let mut count = 0usize;
-	for shell in shells {
-		ffi::compound_add(shape.pin_mut(), shell.inner());
-		count += 1;
-	}
-	if count == 0 {
-		return Err(Error::BrepWriteFailed);
-	}
+	let shape = compound_from_shells(shells).ok_or(Error::BrepWriteFailed)?;
 	let mut rust_writer = RustWriter::from_ref(writer);
 	if ffi::write_brep_stream(&shape, &mut rust_writer) {
 		Ok(())
@@ -292,10 +284,17 @@ fn compound_from_faces<'a>(faces: impl IntoIterator<Item = &'a Face>) -> Option<
 	(count > 0).then_some(shape)
 }
 
-pub(super) fn mesh<'a>(solids: impl IntoIterator<Item = &'a Solid>, options: crate::traits::Tessellation) -> Result<crate::common::mesh::Mesh, Error> {
-	use crate::common::mesh::Mesh;
-	use glam::DVec3;
+fn compound_from_shells<'a>(shells: impl IntoIterator<Item = &'a Shell>) -> Option<cxx::UniquePtr<ffi::TopoDS_Shape>> {
+	let mut shape = ffi::make_empty();
+	let mut count = 0usize;
+	for shell in shells {
+		ffi::compound_add(shape.pin_mut(), shell.inner());
+		count += 1;
+	}
+	(count > 0).then_some(shape)
+}
 
+pub(super) fn mesh<'a>(solids: impl IntoIterator<Item = &'a Solid>, options: crate::traits::Tessellation) -> Result<crate::common::mesh::Mesh, Error> {
 	#[cfg(feature = "color")]
 	let solids: Vec<&Solid> = solids.into_iter().collect();
 	// `Mesh` has only a face level, so a solid-level colour is expanded onto its faces
@@ -316,7 +315,27 @@ pub(super) fn mesh<'a>(solids: impl IntoIterator<Item = &'a Solid>, options: cra
 	};
 
 	let compound = CompoundShape::new(solids);
-	let data = ffi::mesh_shape(compound.inner(), options.deflection_linear, options.deflection_angular, options.relative_linear);
+	let mesh = mesh_shape(compound.inner(), options)?;
+
+	#[cfg(feature = "color")]
+	let mesh = {
+		let mut mesh = mesh;
+		mesh.colormap = mesh.face_ids.iter().filter_map(|fid| face_colors.get(fid).map(|&color| (*fid, color))).collect();
+		mesh
+	};
+	Ok(mesh)
+}
+
+pub(super) fn mesh_shells<'a>(shells: impl IntoIterator<Item = &'a Shell>, options: crate::traits::Tessellation) -> Result<crate::common::mesh::Mesh, Error> {
+	let shape = compound_from_shells(shells).ok_or(Error::TriangulationFailed)?;
+	mesh_shape(&shape, options)
+}
+
+fn mesh_shape(shape: &ffi::TopoDS_Shape, options: crate::traits::Tessellation) -> Result<crate::common::mesh::Mesh, Error> {
+	use crate::common::mesh::Mesh;
+	use glam::DVec3;
+
+	let data = ffi::mesh_shape(shape, options.deflection_linear, options.deflection_angular, options.relative_linear);
 	if !data.success {
 		return Err(Error::TriangulationFailed);
 	}
@@ -332,7 +351,7 @@ pub(super) fn mesh<'a>(solids: impl IntoIterator<Item = &'a Solid>, options: cra
 	// surface triangulation only; edges use `deflection_linear` as an absolute
 	// chord here.
 	let mut edges: Vec<DVec3> = Vec::new();
-	for e in ffi::shape_edges(compound.inner()).iter() {
+	for e in ffi::shape_edges(shape).iter() {
 		let segs = ffi::edge_approximation_segments(e, options.deflection_linear, options.deflection_angular, options.relative_linear);
 		if segs.len() < 6 {
 			continue; // fewer than 2 points — nothing to draw
@@ -345,17 +364,6 @@ pub(super) fn mesh<'a>(solids: impl IntoIterator<Item = &'a Solid>, options: cra
 		}
 	}
 
-	#[cfg(feature = "color")]
-	let colormap = {
-		let mut map = std::collections::HashMap::new();
-		for &fid in &face_ids {
-			if let Some(&color) = face_colors.get(&fid) {
-				map.insert(fid, color);
-			}
-		}
-		map
-	};
-
 	Ok(Mesh {
 		vertices,
 		normals,
@@ -363,7 +371,7 @@ pub(super) fn mesh<'a>(solids: impl IntoIterator<Item = &'a Solid>, options: cra
 		face_ids,
 		face_indices,
 		#[cfg(feature = "color")]
-		colormap,
+		colormap: std::collections::HashMap::new(),
 		edges,
 	})
 }

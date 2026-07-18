@@ -3,7 +3,7 @@ use super::color::Color;
 use glam::{DVec2, DVec3};
 use std::collections::HashMap;
 
-/// A triangle mesh produced by meshing a solid shape.
+/// A triangle mesh produced by meshing an exact shape.
 ///
 /// `indices` contains triangle indices (groups of 3).
 #[derive(Debug, Clone)]
