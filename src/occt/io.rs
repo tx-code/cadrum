@@ -8,6 +8,15 @@ use super::solid::Solid;
 use super::stream::{RustReader, RustWriter};
 use crate::common::error::Error;
 use std::io::{Read, Write};
+use std::sync::{Mutex, MutexGuard};
+
+// OCCT's STEP transfer stack uses process-global protocol state. Concurrent
+// readers or writers can corrupt that state, so keep the unsafe boundary here.
+static STEP_IO_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_step_io() -> MutexGuard<'static, ()> {
+	STEP_IO_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 #[cfg(feature = "color")]
 use crate::common::color::Color;
@@ -86,6 +95,7 @@ fn write_color_trailer<W: Write>(compound: &CompoundShape, writer: &mut W) -> Re
 // surface lives entirely on `Solid`.
 
 pub(super) fn read_step<R: Read>(reader: &mut R) -> Result<Vec<Solid>, Error> {
+	let _guard = lock_step_io();
 	#[cfg(feature = "color")]
 	{
 		let mut rust_reader = RustReader::from_ref(reader);
@@ -110,6 +120,7 @@ pub(super) fn read_step<R: Read>(reader: &mut R) -> Result<Vec<Solid>, Error> {
 }
 
 pub(super) fn read_step_faces<R: Read>(reader: &mut R) -> Result<Vec<Face>, Error> {
+	let _guard = lock_step_io();
 	let mut rust_reader = RustReader::from_ref(reader);
 	let inner = ffi::read_step_faces_stream(&mut rust_reader);
 	if inner.is_null() {
@@ -171,6 +182,7 @@ pub(super) fn read_brep_shells<R: Read>(reader: &mut R) -> Result<Vec<Shell>, Er
 /// With the `color` feature enabled, face colors are automatically embedded
 /// in the STEP file (XDE / AP214 styled items).
 pub(super) fn write_step<'a, W: Write>(solids: impl IntoIterator<Item = &'a Solid>, writer: &mut W) -> Result<(), Error> {
+	let _guard = lock_step_io();
 	let compound = CompoundShape::new(solids);
 	#[cfg(feature = "color")]
 	{
@@ -200,6 +212,7 @@ pub(super) fn write_step<'a, W: Write>(solids: impl IntoIterator<Item = &'a Soli
 }
 
 pub(super) fn write_step_faces<'a, W: Write>(faces: impl IntoIterator<Item = &'a Face>, writer: &mut W) -> Result<(), Error> {
+	let _guard = lock_step_io();
 	let shape = compound_from_faces(faces).ok_or(Error::StepWriteFailed)?;
 	#[cfg(feature = "color")]
 	{

@@ -61,6 +61,29 @@ fn exact_bspline_face_roundtrips_through_step_and_brep() {
 }
 
 #[test]
+fn parallel_step_face_roundtrips_are_serialized() {
+	let workers: Vec<_> = (0..4)
+		.map(|_| {
+			std::thread::spawn(|| {
+				let expected = rational_patch();
+				let face = Face::from_bspline_surface(&expected).expect("B-spline face construction");
+				for _ in 0..4 {
+					let mut step = Vec::new();
+					Face::write_step([&face], &mut step).expect("parallel STEP face write");
+					let faces = Face::read_step(&mut Cursor::new(step)).expect("parallel STEP face read");
+					assert_eq!(faces.len(), 1);
+					assert_surface_close(&faces[0].bspline_surface().expect("parallel B-spline extraction"), &expected);
+				}
+			})
+		})
+		.collect();
+
+	for worker in workers {
+		worker.join().expect("parallel STEP worker");
+	}
+}
+
+#[test]
 fn invalid_bspline_surface_fails_before_occt() {
 	let mut surface = rational_patch();
 	surface.control_points.pop();
