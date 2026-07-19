@@ -24,27 +24,6 @@ impl Shell {
 		&self.inner
 	}
 
-	/// Sew all input faces into exactly one connected shell.
-	pub fn sew<'a>(faces: impl IntoIterator<Item = &'a Face>, tolerance: f64) -> Result<Self, Error> {
-		if !tolerance.is_finite() || tolerance <= 0.0 {
-			return Err(Error::SewFailed("tolerance must be finite and positive".to_string()));
-		}
-		let mut face_vec = ffi::face_vec_new();
-		let mut face_count = 0usize;
-		for face in faces {
-			ffi::face_vec_push(face_vec.pin_mut(), &face.inner);
-			face_count += 1;
-		}
-		if face_count == 0 {
-			return Err(Error::SewFailed("no faces given".to_string()));
-		}
-		let inner = ffi::make_sewn_shell(&face_vec, tolerance);
-		if inner.is_null() {
-			return Err(Error::SewFailed("faces did not form exactly one connected shell".to_string()));
-		}
-		Ok(Self::new(inner))
-	}
-
 	/// Promote this shell only after closed-body validation succeeds.
 	pub fn try_to_solid(&self) -> Result<Solid, Error> {
 		let mut status = 0u32;

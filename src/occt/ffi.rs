@@ -60,6 +60,31 @@ mod ffi_bridge {
 		success: bool,
 	}
 
+	struct ShapeRepairData {
+		status: u32,
+		changed: bool,
+		input_face_count: usize,
+		input_edge_count: usize,
+		output_face_count: usize,
+		output_edge_count: usize,
+		component_count: usize,
+		boundary_edge_count: usize,
+		non_manifold_edge_count: usize,
+		sewing_free_edge_count: usize,
+		sewing_multiple_edge_count: usize,
+		sewn_edge_count: usize,
+		degenerated_shape_count: usize,
+		deleted_face_count: usize,
+		requested_tolerance: f64,
+		effective_tolerance: f64,
+		maximum_tolerance: f64,
+		max_input_tolerance: f64,
+		max_output_tolerance: f64,
+		max_detected_seam_gap: f64,
+		face_history: Vec<u32>,
+		edge_history: Vec<u32>,
+	}
+
 	// Expose Rust stream types to C++ for streambuf callbacks
 	extern "Rust" {
 		type RustReader;
@@ -71,6 +96,7 @@ mod ffi_bridge {
 
 	unsafe extern "C++" {
 		include!("cadrum/cpp/wrapper.h");
+		include!("cadrum/cpp/sew_heal.h");
 		include!("cadrum/cpp/trimmed_bspline.h");
 
 		// Opaque C++ types (accessed as cadrum::TopoDS_Shape etc. via using aliases)
@@ -229,7 +255,8 @@ mod ffi_bridge {
 		fn make_extrude(profile_edges: &CxxVector<TopoDS_Edge>, dx: f64, dy: f64, dz: f64) -> UniquePtr<TopoDS_Shape>;
 		fn make_pipe_shell(all_edges: &CxxVector<TopoDS_Edge>, spine_edges: &CxxVector<TopoDS_Edge>, orient: u32, ux: f64, uy: f64, uz: f64, aux_spine_edges: &CxxVector<TopoDS_Edge>) -> UniquePtr<TopoDS_Shape>;
 		fn make_loft(all_edges: &CxxVector<TopoDS_Edge>, ruled: bool) -> UniquePtr<TopoDS_Shape>;
-		fn make_sewn_shell(faces: &CxxVector<TopoDS_Face>, tolerance: f64) -> UniquePtr<TopoDS_Shape>;
+		fn sew_faces_with_report(faces: &CxxVector<TopoDS_Face>, tolerance: f64, maximum_tolerance: f64, report: &mut ShapeRepairData) -> UniquePtr<TopoDS_Shape>;
+		fn heal_shell_with_report(shape: &TopoDS_Shape, tolerance: f64, maximum_tolerance: f64, report: &mut ShapeRepairData) -> UniquePtr<TopoDS_Shape>;
 		fn make_offset_shape(shape: &TopoDS_Shape, offset: f64, tolerance: f64) -> UniquePtr<TopoDS_Shape>;
 		fn make_bspline_solid(coords: &[f64], nu: u32, nv: u32, u_periodic: bool) -> UniquePtr<TopoDS_Shape>;
 

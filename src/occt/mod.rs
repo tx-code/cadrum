@@ -5,6 +5,7 @@ pub mod edge;
 pub mod face;
 pub(crate) mod ffi;
 pub mod io;
+mod sew_heal;
 pub mod shell;
 pub mod solid;
 pub mod stream;

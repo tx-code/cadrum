@@ -34,6 +34,7 @@ pub use common::{
 	bspline::{BSplineAxis, BSplineSurface},
 	error::{Error, SolidificationFailure},
 	mesh::{Mesh, Scene2D, SceneOption},
+	sew_heal::{RepairError, RepairFailure, RepairOperation, RepairOptions, RepairReport, TopologyHistory},
 	trimmed_bspline::{BSplineCurve2, BSplineCurve3, TrimEdgeUse, TrimLoop, TrimOrientation, TrimmedBSplineFace},
 };
 // Re-export glam types used in cadrum's public API. Users should reach glam

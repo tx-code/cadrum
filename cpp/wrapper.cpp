@@ -2036,42 +2036,6 @@ std::unique_ptr<TopoDS_Shape> make_loft(
     }
 }
 
-std::unique_ptr<TopoDS_Shape> make_sewn_shell(
-    const std::vector<TopoDS_Face>& faces,
-    double tolerance)
-{
-    try {
-        if (faces.empty() || !std::isfinite(tolerance) || tolerance <= 0.0) {
-            return nullptr;
-        }
-        BRepBuilderAPI_Sewing sewing(tolerance);
-        for (const auto& face : faces) sewing.Add(face);
-        sewing.Perform();
-        const TopoDS_Shape& sewn = sewing.SewedShape();
-        if (sewn.IsNull()) return nullptr;
-
-        if (sewn.ShapeType() == TopAbs_FACE && faces.size() == 1) {
-            BRep_Builder builder;
-            TopoDS_Shell shell;
-            builder.MakeShell(shell);
-            builder.Add(shell, TopoDS::Face(sewn));
-            return std::make_unique<TopoDS_Shape>(shell);
-        }
-
-        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> shells;
-        TopExp::MapShapes(sewn, TopAbs_SHELL, shells);
-        if (shells.Extent() != 1) return nullptr;
-        const TopoDS_Shape& shell = shells(1);
-
-        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> shell_faces;
-        TopExp::MapShapes(shell, TopAbs_FACE, shell_faces);
-        if (shell_faces.Extent() != static_cast<int>(faces.size())) return nullptr;
-        return std::make_unique<TopoDS_Shape>(shell);
-    } catch (const Standard_Failure&) {
-        return nullptr;
-    }
-}
-
 // Offset every face of `shape` by signed `offset` (positive = outward)
 // using BRepOffsetAPI_MakeOffsetShape. Same PerformByJoin configuration as
 // builder_thick_solid's sealed-shell fallback (Skin mode, Arc join). The

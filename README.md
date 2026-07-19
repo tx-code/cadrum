@@ -121,7 +121,7 @@ C++17 compiler (GCC, Clang, or MSVC) and CMake.
 |---|---|
 | **Primitives** | `Solid::cube`, `Solid::sphere`, `Solid::cylinder`, `Solid::cone`, `Solid::torus`, `Solid::half_space` |
 | **Curves** | `Edge::line`, `Edge::arc_3pts`, `Edge::circle`, `Edge::polygon`, `Edge::helix`, `Edge::bspline`, exact `Edge::from_bspline_curve` / `Edge::bspline_curve` |
-| **Surfacing** | `Solid::extrude`, `Solid::sweep`, `Solid::loft`, `Solid::bspline`, `Shell::sew`, exact trimmed `Face::from_trimmed_bspline_surface` / `Face::trimmed_bspline_surface` |
+| **Surfacing** | `Solid::extrude`, `Solid::sweep`, `Solid::loft`, `Solid::bspline`, `Shell::sew`, reported `Shell::sew_with_report` / `Shell::heal`, exact trimmed `Face::from_trimmed_bspline_surface` / `Face::trimmed_bspline_surface` |
 | **Editing** | `Solid::shell`, `Solid::fillet_edges`, `Solid::chamfer_edges`, `Solid::clean` |
 | **Queries** | `Solid::volume`, `Solid::area`, `Solid::center`, `Solid::inertia`, `Solid::bounding_box`, `Solid::contains` |
 | **Topology** | `Solid::iter_face`, `Solid::iter_edge`, `Solid::is_valid`, `Shell::iter_face`, `Shell::iter_edge`, `Shell::is_closed`, `Shell::is_valid`, `Shell::boundary_edge_count`, `Shell::try_to_solid`, `Face::iter_edge`, `Face::project`, `Edge::project` |
@@ -1045,6 +1045,11 @@ topology instead of letting OCCT silently reorder or repair the exchange.
 route and intentionally returns only solids. `Shell::sew` joins a complete face
 set into one connected open or closed shell; it exposes closure, validity, and
 boundary-edge diagnostics and preserves shell topology through BRep I/O.
+`Shell::sew_with_report` and `Shell::heal` add an absolute tolerance ceiling,
+pre/post topology counts, non-manifold detection, sampled merged-seam gaps, and
+zero-based Face/Edge source history. They return no shell when the result is
+invalid, disconnected, non-manifold, or exceeds that ceiling; healing operates
+on a copy so a failed repair cannot mutate the source.
 `Shell::try_to_solid` is the explicit promotion route: it rejects open,
 non-manifold, invalid, unorientable, or non-positive-volume results.
 `BrepBody::read_brep` parses one payload once and returns solids plus shells that
