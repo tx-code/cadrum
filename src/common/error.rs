@@ -105,6 +105,9 @@ pub enum Error {
 	/// The string identifies which stage failed and with what parameters.
 	BsplineFailed(String),
 
+	/// Exact trimmed B-spline face construction or extraction failed.
+	TrimmedFaceFailed(String),
+
 	/// Edge construction failed due to degenerate input (e.g. collinear arc
 	/// points, zero-length line, negative radius). The string describes which
 	/// constructor failed and with which parameters.
@@ -151,6 +154,7 @@ impl std::fmt::Display for Error {
 			Error::SolidificationFailed(reason) => write!(f, "Solidification failed: {reason}"),
 			Error::OffsetFailed(msg) => write!(f, "Offset failed: {}", msg),
 			Error::BsplineFailed(msg) => write!(f, "Bspline failed: {}", msg),
+			Error::TrimmedFaceFailed(msg) => write!(f, "Trimmed face failed: {}", msg),
 			Error::InvalidEdge(msg) => write!(f, "Invalid edge: {}", msg),
 			Error::SvgExportFailed => write!(f, "SVG export failed"),
 			Error::PngExportFailed => write!(f, "PNG export failed"),

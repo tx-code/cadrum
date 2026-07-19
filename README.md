@@ -120,8 +120,8 @@ C++17 compiler (GCC, Clang, or MSVC) and CMake.
 | Area | Methods |
 |---|---|
 | **Primitives** | `Solid::cube`, `Solid::sphere`, `Solid::cylinder`, `Solid::cone`, `Solid::torus`, `Solid::half_space` |
-| **Curves** | `Edge::line`, `Edge::arc_3pts`, `Edge::circle`, `Edge::polygon`, `Edge::helix`, `Edge::bspline` |
-| **Surfacing** | `Solid::extrude`, `Solid::sweep`, `Solid::loft`, `Solid::bspline`, `Shell::sew` |
+| **Curves** | `Edge::line`, `Edge::arc_3pts`, `Edge::circle`, `Edge::polygon`, `Edge::helix`, `Edge::bspline`, exact `Edge::from_bspline_curve` / `Edge::bspline_curve` |
+| **Surfacing** | `Solid::extrude`, `Solid::sweep`, `Solid::loft`, `Solid::bspline`, `Shell::sew`, exact trimmed `Face::from_trimmed_bspline_surface` / `Face::trimmed_bspline_surface` |
 | **Editing** | `Solid::shell`, `Solid::fillet_edges`, `Solid::chamfer_edges`, `Solid::clean` |
 | **Queries** | `Solid::volume`, `Solid::area`, `Solid::center`, `Solid::inertia`, `Solid::bounding_box`, `Solid::contains` |
 | **Topology** | `Solid::iter_face`, `Solid::iter_edge`, `Solid::is_valid`, `Shell::iter_face`, `Shell::iter_edge`, `Shell::is_closed`, `Shell::is_valid`, `Shell::boundary_edge_count`, `Shell::try_to_solid`, `Face::iter_edge`, `Face::project`, `Edge::project` |
@@ -1034,6 +1034,13 @@ let faces = Face::read_step(&mut input)?;
 # Ok::<(), cadrum::Error>(())
 ```
 
+`TrimmedBSplineFace` extends the same exchange with unique exact 3D edges and
+ordered outer/inner loops. Every edge occurrence retains its direction and
+exact 2D p-curve; a periodic seam is represented by two oppositely oriented
+occurrences of one 3D edge. Construction rejects disconnected loops,
+curve/p-curve parameter drift, curve-on-surface mismatch, and invalid face
+topology instead of letting OCCT silently reorder or repair the exchange.
+
 `Face::read_step` retains open faces. `Solid::read_step` remains the closed-body
 route and intentionally returns only solids. `Shell::sew` joins a complete face
 set into one connected open or closed shell; it exposes closure, validity, and
@@ -1065,8 +1072,9 @@ let s = Solid::cube(DVec3::ZERO, DVec3::ONE).rotate_z(0.5).translate(DVec3::X);
 let v = s.volume();
 ```
 
-`BSplineAxis` and `BSplineSurface` are geometry payloads rather than topology
-handles; they cross exact exchange boundaries without exposing OCCT objects.
+`BSplineAxis`, `BSplineCurve2`, `BSplineCurve3`, `BSplineSurface`, and
+`TrimmedBSplineFace` are exchange payloads rather than topology handles; they
+cross exact boundaries without exposing OCCT objects.
 
 ## Errors
 

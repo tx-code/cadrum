@@ -29,6 +29,37 @@ mod ffi_bridge {
 		success: bool,
 	}
 
+	struct BSplineCurveData {
+		control_points: Vec<f64>,
+		weights: Vec<f64>,
+		knots: Vec<f64>,
+		multiplicities: Vec<u32>,
+		degree: u32,
+		periodic: bool,
+		first: f64,
+		last: f64,
+		dimension: u32,
+		success: bool,
+	}
+
+	struct TrimEdgeUseData {
+		edge: u32,
+		reversed: bool,
+		pcurve: BSplineCurveData,
+	}
+
+	struct TrimLoopData {
+		edges: Vec<TrimEdgeUseData>,
+	}
+
+	struct TrimmedFaceData {
+		surface: BSplineSurfaceData,
+		edges: Vec<BSplineCurveData>,
+		loops: Vec<TrimLoopData>,
+		tolerance: f64,
+		success: bool,
+	}
+
 	// Expose Rust stream types to C++ for streambuf callbacks
 	extern "Rust" {
 		type RustReader;
@@ -40,6 +71,7 @@ mod ffi_bridge {
 
 	unsafe extern "C++" {
 		include!("cadrum/cpp/wrapper.h");
+		include!("cadrum/cpp/trimmed_bspline.h");
 
 		// Opaque C++ types (accessed as cadrum::TopoDS_Shape etc. via using aliases)
 		type TopoDS_Shape;
@@ -166,6 +198,8 @@ mod ffi_bridge {
 		fn face_uses_natural_surface_bounds(face: &TopoDS_Face) -> bool;
 		fn make_bspline_face(data: &BSplineSurfaceData) -> UniquePtr<TopoDS_Face>;
 		fn face_bspline_surface(face: &TopoDS_Face) -> BSplineSurfaceData;
+		fn make_trimmed_bspline_face(data: &TrimmedFaceData, out_status: &mut u32) -> UniquePtr<TopoDS_Face>;
+		fn face_trimmed_bspline_data(face: &TopoDS_Face) -> TrimmedFaceData;
 
 		// ==================== Edge Methods ====================
 
@@ -177,6 +211,8 @@ mod ffi_bridge {
 		fn make_line_edge(ax: f64, ay: f64, az: f64, bx: f64, by: f64, bz: f64) -> UniquePtr<TopoDS_Edge>;
 		fn make_arc_edge(sx: f64, sy: f64, sz: f64, mx: f64, my: f64, mz: f64, ex: f64, ey: f64, ez: f64) -> UniquePtr<TopoDS_Edge>;
 		fn make_bspline_edge(coords: &[f64], end_kind: u32, sx: f64, sy: f64, sz: f64, ex: f64, ey: f64, ez: f64) -> UniquePtr<TopoDS_Edge>;
+		fn make_exact_bspline_edge(data: &BSplineCurveData) -> UniquePtr<TopoDS_Edge>;
+		fn edge_bspline_curve(edge: &TopoDS_Edge) -> BSplineCurveData;
 
 		fn edge_endpoints(edge: &TopoDS_Edge, sx: &mut f64, sy: &mut f64, sz: &mut f64, ex: &mut f64, ey: &mut f64, ez: &mut f64);
 		fn edge_tangents(edge: &TopoDS_Edge, sx: &mut f64, sy: &mut f64, sz: &mut f64, ex: &mut f64, ey: &mut f64, ez: &mut f64);

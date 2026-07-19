@@ -47,7 +47,7 @@ impl BSplineSurface {
 	}
 }
 
-fn validate_axis(name: &str, control_count: usize, axis: &BSplineAxis) -> Result<(), String> {
+pub(crate) fn validate_axis(name: &str, control_count: usize, axis: &BSplineAxis) -> Result<(), String> {
 	if axis.degree == 0 || axis.degree as usize >= control_count {
 		return Err(format!("{name} degree must be in 1..{control_count}"));
 	}
