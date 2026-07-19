@@ -143,6 +143,49 @@ impl Solid {
 	pub fn is_null(&self) -> bool {
 		ffi::shape_is_null(&self.inner)
 	}
+
+	/// Return an ordered exact topology snapshot for this Solid.
+	pub fn topology(&self) -> Result<crate::ShapeTopology, Error> {
+		super::topology::snapshot(&self.inner)
+	}
+
+	/// Build a finite Solid from an outer shell followed by cavity shells.
+	///
+	/// Every shell must be valid, closed, and manifold. Cavities must be
+	/// strictly contained by the first shell and may not touch or overlap it or
+	/// one another. Cavity orientation is normalized by the kernel boundary.
+	pub fn try_from_shells<'a>(shells: impl IntoIterator<Item = &'a Shell>) -> Result<Self, Error> {
+		let mut native_shells = ffi::shape_vec_new();
+		for shell in shells {
+			ffi::shape_vec_push(native_shells.pin_mut(), shell.inner());
+		}
+		let mut status = 20u32;
+		let mut detail = 0usize;
+		let mut related = 0usize;
+		let inner = ffi::make_solid_from_shells(&native_shells, &mut status, &mut detail, &mut related);
+		if status == 0 && !inner.is_null() {
+			return Ok(Self::new(
+				inner,
+				#[cfg(feature = "color")]
+				std::collections::HashMap::new(),
+				Default::default(),
+			));
+		}
+		let failure = match status {
+			20 => crate::SolidificationFailure::EmptyShellSet,
+			21 => crate::SolidificationFailure::InvalidConstituentShell { shell_index: detail },
+			22 => crate::SolidificationFailure::OpenConstituentShell { shell_index: detail, boundary_edge_count: related },
+			23 => crate::SolidificationFailure::NonManifoldConstituentShell { shell_index: detail, edge_count: related },
+			24 => crate::SolidificationFailure::BuildFailed,
+			25 => crate::SolidificationFailure::OrientationFailed,
+			26 => crate::SolidificationFailure::CavityNotContained { shell_index: detail },
+			27 => crate::SolidificationFailure::ShellIntersection { first_shell_index: related, second_shell_index: detail },
+			28 => crate::SolidificationFailure::InvalidSolid,
+			29 => crate::SolidificationFailure::NonPositiveVolume,
+			_ => crate::SolidificationFailure::KernelFailure,
+		};
+		Err(Error::SolidificationFailed(failure))
+	}
 }
 
 impl SolidStruct for Solid {

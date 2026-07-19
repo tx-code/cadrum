@@ -62,6 +62,11 @@ impl Shell {
 		ffi::shell_boundary_edge_count(&self.inner)
 	}
 
+	/// Return an ordered exact topology snapshot for this Shell.
+	pub fn topology(&self) -> Result<crate::ShapeTopology, Error> {
+		super::topology::snapshot(&self.inner)
+	}
+
 	pub fn iter_edge(&self) -> impl Iterator<Item = &Edge> + '_ {
 		self.edges.get_or_init(|| ffi::shape_edges(&self.inner).iter().map(|edge| Edge::try_from_ffi(ffi::clone_edge_handle(edge), "shell edge is null".into()).expect("shape_edges returned null")).collect()).iter()
 	}
@@ -74,8 +79,18 @@ impl Shell {
 		io::read_brep_shells(reader)
 	}
 
+	/// Read independent shells from STEP without promoting closed shells.
+	pub fn read_step<R: Read>(reader: &mut R) -> Result<Vec<Self>, Error> {
+		super::body_io::read_step_shells(reader)
+	}
+
 	pub fn write_brep<'a, W: Write>(shells: impl IntoIterator<Item = &'a Self>, writer: &mut W) -> Result<(), Error> {
 		io::write_brep_shells(shells, writer)
+	}
+
+	/// Write shells to STEP while preserving their Shell classification.
+	pub fn write_step<'a, W: Write>(shells: impl IntoIterator<Item = &'a Self>, writer: &mut W) -> Result<(), Error> {
+		super::body_io::write_step_shells(shells, writer)
 	}
 
 	pub fn mesh<'a>(shells: impl IntoIterator<Item = &'a Self>, options: crate::Tessellation) -> Result<crate::Mesh, Error> {

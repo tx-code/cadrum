@@ -214,7 +214,7 @@ fn link_occt_libraries(occt_include: &Path, occt_lib_dir: &Path, target: &str) {
 	}
 
 	let mut build = cxx_build::bridge("src/occt/ffi.rs");
-	build.file("cpp/wrapper.cpp").file("cpp/bspline_surface.cpp").file("cpp/trimmed_bspline.cpp").file("cpp/sew_heal.cpp").include(occt_include).std("c++17").define("_USE_MATH_DEFINES", None);
+	build.file("cpp/wrapper.cpp").file("cpp/body_topology.cpp").file("cpp/bspline_surface.cpp").file("cpp/trimmed_bspline.cpp").file("cpp/sew_heal.cpp").file("cpp/solid_from_shells.cpp").include(occt_include).std("c++17").define("_USE_MATH_DEFINES", None);
 
 	apply_compiler_flags(|s| {
 		build.flag(s);
@@ -237,12 +237,16 @@ fn link_occt_libraries(occt_include: &Path, occt_lib_dir: &Path, target: &str) {
 	println!("cargo:rerun-if-changed=src/occt/ffi.rs");
 	println!("cargo:rerun-if-changed=cpp/wrapper.h");
 	println!("cargo:rerun-if-changed=cpp/wrapper.cpp");
+	println!("cargo:rerun-if-changed=cpp/body_topology.h");
+	println!("cargo:rerun-if-changed=cpp/body_topology.cpp");
 	println!("cargo:rerun-if-changed=cpp/bspline_internal.h");
 	println!("cargo:rerun-if-changed=cpp/bspline_surface.cpp");
 	println!("cargo:rerun-if-changed=cpp/trimmed_bspline.h");
 	println!("cargo:rerun-if-changed=cpp/trimmed_bspline.cpp");
 	println!("cargo:rerun-if-changed=cpp/sew_heal.h");
 	println!("cargo:rerun-if-changed=cpp/sew_heal.cpp");
+	println!("cargo:rerun-if-changed=cpp/solid_from_shells.h");
+	println!("cargo:rerun-if-changed=cpp/solid_from_shells.cpp");
 }
 
 /// Provide OCCT into `effective_root` by downloading a prebuilt tarball for `target`.

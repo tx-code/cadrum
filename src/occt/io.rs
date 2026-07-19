@@ -1,6 +1,5 @@
 //! I/O helpers exposed through `Solid` and `Face`.
 
-use super::body::BrepBody;
 use super::compound::CompoundShape;
 use super::face::Face;
 use super::ffi;
@@ -15,7 +14,7 @@ use std::sync::{Mutex, MutexGuard};
 // readers or writers can corrupt that state, so keep the unsafe boundary here.
 static STEP_IO_LOCK: Mutex<()> = Mutex::new(());
 
-fn lock_step_io() -> MutexGuard<'static, ()> {
+pub(super) fn lock_step_io() -> MutexGuard<'static, ()> {
 	STEP_IO_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
@@ -67,11 +66,11 @@ fn trailer_ids(shape: &ffi::TopoDS_Shape) -> Vec<u64> {
 }
 
 #[cfg(feature = "color")]
-fn write_color_trailer<W: Write>(compound: &CompoundShape, writer: &mut W) -> Result<(), Error> {
-	let id_to_index: std::collections::HashMap<u64, u32> = trailer_ids(compound.inner()).into_iter().enumerate().map(|(i, id)| (id, i as u32)).collect();
+pub(super) fn write_color_trailer<W: Write>(shape: &ffi::TopoDS_Shape, colormap: &std::collections::HashMap<u64, Color>, writer: &mut W) -> Result<(), Error> {
+	let id_to_index: std::collections::HashMap<u64, u32> = trailer_ids(shape).into_iter().enumerate().map(|(i, id)| (id, i as u32)).collect();
 	// `CompoundShape::decompose` gives every solid a clone of the merged colormap, so
 	// a solid carries its siblings' keys too; those have no index and drop out here.
-	let mut entries: Vec<(u32, f32, f32, f32)> = compound.colormap().iter().filter_map(|(id, rgb)| id_to_index.get(id).map(|&idx| (idx, rgb.r, rgb.g, rgb.b))).collect();
+	let mut entries: Vec<(u32, f32, f32, f32)> = colormap.iter().filter_map(|(id, rgb)| id_to_index.get(id).map(|&idx| (idx, rgb.r, rgb.g, rgb.b))).collect();
 	if entries.is_empty() {
 		return Ok(());
 	}
@@ -95,29 +94,67 @@ fn write_color_trailer<W: Write>(compound: &CompoundShape, writer: &mut W) -> Re
 // `super::solid::Solid`. Kept module-private (`pub(super)`) so the public
 // surface lives entirely on `Solid`.
 
-pub(super) fn read_step<R: Read>(reader: &mut R) -> Result<Vec<Solid>, Error> {
+pub(super) struct ImportedShape {
+	pub(super) inner: cxx::UniquePtr<ffi::TopoDS_Shape>,
+	#[cfg(feature = "color")]
+	pub(super) colormap: std::collections::HashMap<u64, Color>,
+}
+
+pub(super) fn read_step_shape<R: Read>(reader: &mut R, preserve_body_types: bool) -> Result<ImportedShape, Error> {
 	let _guard = lock_step_io();
 	#[cfg(feature = "color")]
 	{
 		let mut rust_reader = RustReader::from_ref(reader);
 		let mut ids: Vec<u64> = Default::default();
 		let mut rgb: Vec<f32> = Default::default();
-		let inner = ffi::read_step_color_stream(&mut rust_reader, &mut ids, &mut rgb);
+		let inner = ffi::read_step_color_stream(&mut rust_reader, &mut ids, &mut rgb, preserve_body_types);
 		if inner.is_null() {
 			return Err(Error::StepReadFailed);
 		}
-		let colormap: std::collections::HashMap<u64, Color> = ids.into_iter().zip(rgb.chunks_exact(3)).map(|(id, c)| (id, Color { r: c[0], g: c[1], b: c[2] })).collect();
-		Ok(CompoundShape::from_raw(inner, colormap, Default::default()).decompose())
+		let colormap = ids.into_iter().zip(rgb.chunks_exact(3)).map(|(id, color)| (id, Color { r: color[0], g: color[1], b: color[2] })).collect();
+		Ok(ImportedShape { inner, colormap })
 	}
 	#[cfg(not(feature = "color"))]
 	{
 		let mut rust_reader = RustReader::from_ref(reader);
-		let inner = ffi::read_step_stream(&mut rust_reader);
+		let inner = ffi::read_step_stream(&mut rust_reader, preserve_body_types);
 		if inner.is_null() {
 			return Err(Error::StepReadFailed);
 		}
-		Ok(CompoundShape::from_raw(inner, Default::default()).decompose())
+		Ok(ImportedShape { inner })
 	}
+}
+
+pub(super) fn read_brep_shape<R: Read>(reader: &mut R) -> Result<ImportedShape, Error> {
+	// Buffered whole because binary BRep may seek backwards to shared sub-shapes.
+	let mut buf = Vec::new();
+	reader.read_to_end(&mut buf).map_err(|_| Error::BrepReadFailed)?;
+	let mut consumed = 0usize;
+	let inner = ffi::read_brep_stream(&buf, &mut consumed);
+	if inner.is_null() {
+		return Err(Error::BrepReadFailed);
+	}
+	#[cfg(feature = "color")]
+	let colormap = {
+		let ids = trailer_ids(&inner);
+		read_color_trailer(buf.get(consumed..).unwrap_or_default()).into_iter().filter_map(|(index, color)| ids.get(index as usize).map(|&id| (id, color))).collect()
+	};
+	Ok(ImportedShape {
+		inner,
+		#[cfg(feature = "color")]
+		colormap,
+	})
+}
+
+pub(super) fn read_step<R: Read>(reader: &mut R) -> Result<Vec<Solid>, Error> {
+	let imported = read_step_shape(reader, false)?;
+	Ok(CompoundShape::from_raw(
+		imported.inner,
+		#[cfg(feature = "color")]
+		imported.colormap,
+		Default::default(),
+	)
+	.decompose())
 }
 
 pub(super) fn read_step_faces<R: Read>(reader: &mut R) -> Result<Vec<Face>, Error> {
@@ -131,63 +168,14 @@ pub(super) fn read_step_faces<R: Read>(reader: &mut R) -> Result<Vec<Face>, Erro
 }
 
 pub(super) fn read_brep<R: Read>(reader: &mut R) -> Result<Vec<Solid>, Error> {
-	// Buffered whole because binary BRep may seek backwards to shared sub-shapes.
-	let mut buf = Vec::new();
-	reader.read_to_end(&mut buf).map_err(|_| Error::BrepReadFailed)?;
-
-	// Payload length — where a trailer would begin. Unwritten, and unread, on null.
-	let mut consumed = 0usize;
-	let inner = ffi::read_brep_stream(&buf, &mut consumed);
-	if inner.is_null() {
-		return Err(Error::BrepReadFailed);
-	}
-
-	#[cfg(feature = "color")]
-	{
-		let ids = trailer_ids(&inner);
-		let colormap = read_color_trailer(buf.get(consumed..).unwrap_or_default()).into_iter().filter_map(|(idx, color)| ids.get(idx as usize).map(|&id| (id, color))).collect();
-		Ok(CompoundShape::from_raw(inner, colormap, Default::default()).decompose())
-	}
-	#[cfg(not(feature = "color"))]
-	{
-		Ok(CompoundShape::from_raw(inner, Default::default()).decompose())
-	}
-}
-
-pub(super) fn read_brep_bodies<R: Read>(reader: &mut R) -> Result<Vec<BrepBody>, Error> {
-	let mut buf = Vec::new();
-	reader.read_to_end(&mut buf).map_err(|_| Error::BrepReadFailed)?;
-	let mut consumed = 0usize;
-	let inner = ffi::read_brep_stream(&buf, &mut consumed);
-	if inner.is_null() {
-		return Err(Error::BrepReadFailed);
-	}
-
-	#[cfg(feature = "color")]
-	let colormap: std::collections::HashMap<u64, Color> = {
-		let ids = trailer_ids(&inner);
-		read_color_trailer(buf.get(consumed..).unwrap_or_default()).into_iter().filter_map(|(index, color)| ids.get(index as usize).map(|&id| (id, color))).collect()
-	};
-
-	let bodies = ffi::decompose_into_brep_bodies(&inner);
-	let result = bodies
-		.iter()
-		.filter_map(|shape| {
-			if ffi::shape_is_solid(shape) {
-				Some(BrepBody::Solid(Solid::new(
-					ffi::clone_shape_handle(shape),
-					#[cfg(feature = "color")]
-					colormap.clone(),
-					Default::default(),
-				)))
-			} else if ffi::shape_is_shell(shape) {
-				Some(BrepBody::Shell(Shell::new(ffi::clone_shape_handle(shape))))
-			} else {
-				None
-			}
-		})
-		.collect::<Vec<_>>();
-	(!result.is_empty()).then_some(result).ok_or(Error::BrepReadFailed)
+	let imported = read_brep_shape(reader)?;
+	Ok(CompoundShape::from_raw(
+		imported.inner,
+		#[cfg(feature = "color")]
+		imported.colormap,
+		Default::default(),
+	)
+	.decompose())
 }
 
 pub(super) fn read_brep_faces<R: Read>(reader: &mut R) -> Result<Vec<Face>, Error> {
@@ -281,7 +269,7 @@ pub(super) fn write_brep<'a, W: Write>(solids: impl IntoIterator<Item = &'a Soli
 		}
 	}
 	#[cfg(feature = "color")]
-	write_color_trailer(&compound, writer)?;
+	write_color_trailer(compound.inner(), compound.colormap(), writer)?;
 	Ok(())
 }
 
@@ -411,37 +399,4 @@ fn mesh_shape(shape: &ffi::TopoDS_Shape, options: crate::traits::Tessellation) -
 		colormap: std::collections::HashMap::new(),
 		edges,
 	})
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use crate::DVec3;
-
-	#[test]
-	fn body_reader_keeps_free_shells_beside_solids_without_nested_duplicates() {
-		let solid = Solid::cube(DVec3::ZERO, DVec3::ONE);
-		let shell_source = Solid::cube(DVec3::splat(3.0), DVec3::splat(4.0));
-		let shell = Shell::sew(shell_source.iter_face().take(5), 1.0e-7).expect("open shell");
-		let mut compound = ffi::make_empty();
-		ffi::compound_add(compound.pin_mut(), solid.inner());
-		ffi::compound_add(compound.pin_mut(), shell.inner());
-
-		let mut payload = Vec::new();
-		let mut writer = RustWriter::from_ref(&mut payload);
-		assert!(ffi::write_brep_stream(&compound, &mut writer));
-		let bodies = read_brep_bodies(&mut payload.as_slice()).expect("mixed BRep bodies");
-
-		assert_eq!(bodies.len(), 2);
-		assert_eq!(bodies.iter().filter(|body| matches!(body, BrepBody::Solid(_))).count(), 1);
-		assert_eq!(bodies.iter().filter(|body| matches!(body, BrepBody::Shell(_))).count(), 1);
-		let shell = bodies
-			.iter()
-			.find_map(|body| match body {
-				BrepBody::Shell(shell) => Some(shell),
-				BrepBody::Solid(_) => None,
-			})
-			.expect("free shell");
-		assert!(!shell.is_closed());
-	}
 }

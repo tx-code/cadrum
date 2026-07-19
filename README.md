@@ -124,9 +124,9 @@ C++17 compiler (GCC, Clang, or MSVC) and CMake.
 | **Surfacing** | `Solid::extrude`, `Solid::sweep`, `Solid::loft`, `Solid::bspline`, `Shell::sew`, reported `Shell::sew_with_report` / `Shell::heal`, exact trimmed `Face::from_trimmed_bspline_surface` / `Face::trimmed_bspline_surface` |
 | **Editing** | `Solid::shell`, `Solid::fillet_edges`, `Solid::chamfer_edges`, `Solid::clean` |
 | **Queries** | `Solid::volume`, `Solid::area`, `Solid::center`, `Solid::inertia`, `Solid::bounding_box`, `Solid::contains` |
-| **Topology** | `Solid::iter_face`, `Solid::iter_edge`, `Solid::is_valid`, `Shell::iter_face`, `Shell::iter_edge`, `Shell::is_closed`, `Shell::is_valid`, `Shell::boundary_edge_count`, `Shell::try_to_solid`, `Face::iter_edge`, `Face::project`, `Edge::project` |
+| **Topology** | `Solid::topology` / `Shell::topology` ordered snapshots, `Solid::iter_face`, `Solid::iter_edge`, `Solid::is_valid`, `Solid::try_from_shells`, `Shell::iter_face`, `Shell::iter_edge`, `Shell::is_closed`, `Shell::is_valid`, `Shell::boundary_edge_count`, `Shell::try_to_solid`, `Face::iter_edge`, `Face::project`, `Edge::project` |
 | **Identity / history** | `Solid::id`, `Face::id`, `Edge::id`, `Solid::iter_history` |
-| **I/O** | `Solid::read_step` / `Solid::write_step`, `BrepBody::read_brep` for one-pass solid and independent-shell classification, `Solid::read_brep` / `Solid::write_brep`, `Shell::read_brep` / `Shell::write_brep` (BRep = OCCT's `BinTools` binary format) |
+| **I/O** | `BrepBody::read_step` / `write_step` and `read_brep` / `write_brep` for ordered mixed Solid/Shell exchange, `Solid::read_step` / `Solid::write_step`, `Solid::read_brep` / `Solid::write_brep`, `Shell::read_step` / `Shell::write_step`, `Shell::read_brep` / `Shell::write_brep` (BRep = OCCT's `BinTools` binary format) |
 | **Mesh** | `Solid::mesh` / `Shell::mesh` → `Mesh`, `Mesh::write_stl`, `Mesh::write_gltf_binary`, `Mesh::scene` → `Scene2D`, `Scene2D::write_svg`, `Scene2D::write_png` *(png)*, `Solid::write_multiview_png` *(png)* |
 | **Color** *(feature `color`)* | per-face and per-solid color preserved across STEP / BRep / STL / glTF / SVG round-trips |
 
@@ -1052,9 +1052,29 @@ invalid, disconnected, non-manifold, or exceeds that ceiling; healing operates
 on a copy so a failed repair cannot mutate the source.
 `Shell::try_to_solid` is the explicit promotion route: it rejects open,
 non-manifold, invalid, unorientable, or non-positive-volume results.
-`BrepBody::read_brep` parses one payload once and returns solids plus shells that
-are not nested inside those solids, preserving mixed-body classification without
-duplicating each solid's own shells.
+`Solid::try_from_shells` accepts one outer shell followed by cavity shells and
+validates closure, manifoldness, strict containment, pairwise separation,
+orientation, and final positive volume before constructing a multi-shell Solid.
+
+`Solid::topology`, `Shell::topology`, and `BrepBody::topology` return an ordered,
+index-addressed `ShapeTopology`: Vertex position/tolerance, canonical Edge
+start/end vertices, all face-side edge incidences, ordered outer/inner Face
+loops (including duplicate seam occurrences), and oriented Face/Shell uses with
+explicit independent/outer/cavity shell roles.
+`runtime_id` fields are current-process OCCT identities only; vector indices or
+caller-owned application IDs are the exchange identity and no native pointer ID
+is promised across serialization.
+
+`BrepBody` parses each STEP or BRep payload once and returns solids plus
+independent shells without duplicating shells nested in a Solid. Its writers
+preserve mixed classification and order. OCCT's STEP translator groups body
+types, so Cadrum writes the original kind sequence in an ISO 10303-21 comment
+(`CADRUM_BODY_ORDER`) and restores it on read; other STEP readers may ignore the
+comment. Within each kind, native STEP occurrence order remains authoritative.
+The `color` feature preserves modeled face/solid color. Shell-level color,
+names, and unit metadata are not modeled by `BrepBody`; BRep has no such native
+metadata contract, and STEP names/units are currently diagnostic input rather
+than symmetric API fields.
 
 ## The Type Map
 
@@ -1077,9 +1097,10 @@ let s = Solid::cube(DVec3::ZERO, DVec3::ONE).rotate_z(0.5).translate(DVec3::X);
 let v = s.volume();
 ```
 
-`BSplineAxis`, `BSplineCurve2`, `BSplineCurve3`, `BSplineSurface`, and
-`TrimmedBSplineFace` are exchange payloads rather than topology handles; they
-cross exact boundaries without exposing OCCT objects.
+`Vertex`, `ShapeTopology`, its `Topology*` records, `BSplineAxis`,
+`BSplineCurve2`, `BSplineCurve3`, `BSplineSurface`, and `TrimmedBSplineFace` are
+immutable exchange payloads rather than topology handles; they cross exact
+boundaries without exposing OCCT objects.
 
 ## Errors
 

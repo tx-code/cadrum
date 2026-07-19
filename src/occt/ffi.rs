@@ -85,6 +85,65 @@ mod ffi_bridge {
 		edge_history: Vec<u32>,
 	}
 
+	struct TopologyVertexData {
+		runtime_id: u64,
+		x: f64,
+		y: f64,
+		z: f64,
+		tolerance: f64,
+	}
+
+	struct TopologyEdgeIncidentData {
+		face: u32,
+		boundary_loop: u32,
+		edge_use: u32,
+		orientation: u8,
+	}
+
+	struct TopologyEdgeData {
+		runtime_id: u64,
+		start_vertex: u32,
+		end_vertex: u32,
+		incidents: Vec<TopologyEdgeIncidentData>,
+	}
+
+	struct TopologyEdgeUseData {
+		edge: u32,
+		orientation: u8,
+	}
+
+	struct TopologyLoopData {
+		is_outer: bool,
+		orientation: u8,
+		edges: Vec<TopologyEdgeUseData>,
+	}
+
+	struct TopologyFaceData {
+		runtime_id: u64,
+		boundary_loops: Vec<TopologyLoopData>,
+	}
+
+	struct TopologyFaceUseData {
+		face: u32,
+		orientation: u8,
+	}
+
+	struct TopologyShellData {
+		runtime_id: u64,
+		role: u8,
+		orientation: u8,
+		is_closed: bool,
+		faces: Vec<TopologyFaceUseData>,
+	}
+
+	struct ShapeTopologyData {
+		vertices: Vec<TopologyVertexData>,
+		edges: Vec<TopologyEdgeData>,
+		faces: Vec<TopologyFaceData>,
+		shells: Vec<TopologyShellData>,
+		success: bool,
+	}
+
 	// Expose Rust stream types to C++ for streambuf callbacks
 	extern "Rust" {
 		type RustReader;
@@ -96,7 +155,9 @@ mod ffi_bridge {
 
 	unsafe extern "C++" {
 		include!("cadrum/cpp/wrapper.h");
+		include!("cadrum/cpp/body_topology.h");
 		include!("cadrum/cpp/sew_heal.h");
+		include!("cadrum/cpp/solid_from_shells.h");
 		include!("cadrum/cpp/trimmed_bspline.h");
 
 		// Opaque C++ types (accessed as cadrum::TopoDS_Shape etc. via using aliases)
@@ -109,7 +170,7 @@ mod ffi_bridge {
 		// Plain STEP I/O — used only without `color` feature.
 		// With color, STEP goes through XCAF (`read_step_color_stream` etc.).
 		#[cfg(not(feature = "color"))]
-		fn read_step_stream(reader: &mut RustReader) -> UniquePtr<TopoDS_Shape>;
+		fn read_step_stream(reader: &mut RustReader, preserve_body_types: bool) -> UniquePtr<TopoDS_Shape>;
 		fn read_step_faces_stream(reader: &mut RustReader) -> UniquePtr<TopoDS_Shape>;
 		#[cfg(not(feature = "color"))]
 		fn write_step_stream(shape: &TopoDS_Shape, writer: &mut RustWriter) -> bool;
@@ -139,7 +200,7 @@ mod ffi_bridge {
 		// ==================== Colored STEP I/O (color feature only) ====================
 
 		#[cfg(feature = "color")]
-		fn read_step_color_stream(reader: &mut RustReader, out_ids: &mut Vec<u64>, out_rgb: &mut Vec<f32>) -> UniquePtr<TopoDS_Shape>;
+		fn read_step_color_stream(reader: &mut RustReader, out_ids: &mut Vec<u64>, out_rgb: &mut Vec<f32>, preserve_body_types: bool) -> UniquePtr<TopoDS_Shape>;
 
 		#[cfg(feature = "color")]
 		fn write_step_color_stream(shape: &TopoDS_Shape, ids: &[u64], rgb: &[f32], writer: &mut RustWriter) -> bool;
@@ -181,6 +242,7 @@ mod ffi_bridge {
 		fn shell_is_closed(shape: &TopoDS_Shape) -> bool;
 		fn shell_boundary_edge_count(shape: &TopoDS_Shape) -> usize;
 		fn make_solid_from_shell(shell: &TopoDS_Shape, out_status: &mut u32, out_detail: &mut usize) -> UniquePtr<TopoDS_Shape>;
+		fn make_solid_from_shells(shells: &CxxVector<TopoDS_Shape>, out_status: &mut u32, out_detail: &mut usize, out_related: &mut usize) -> UniquePtr<TopoDS_Shape>;
 		fn shape_volume(shape: &TopoDS_Shape) -> f64;
 		fn shape_surface_area(shape: &TopoDS_Shape) -> f64;
 		fn shape_center_of_mass(shape: &TopoDS_Shape, x: &mut f64, y: &mut f64, z: &mut f64);
@@ -205,6 +267,7 @@ mod ffi_bridge {
 		fn shape_edges(shape: &TopoDS_Shape) -> UniquePtr<CxxVector<TopoDS_Edge>>;
 		fn shape_faces(shape: &TopoDS_Shape) -> UniquePtr<CxxVector<TopoDS_Face>>;
 		fn face_edges(face: &TopoDS_Face) -> UniquePtr<CxxVector<TopoDS_Edge>>;
+		fn shape_topology(shape: &TopoDS_Shape) -> ShapeTopologyData;
 
 		fn clone_shape_handle(shape: &TopoDS_Shape) -> UniquePtr<TopoDS_Shape>;
 		fn clone_edge_handle(edge: &TopoDS_Edge) -> UniquePtr<TopoDS_Edge>;

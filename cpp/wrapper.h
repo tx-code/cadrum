@@ -79,7 +79,8 @@ private:
 // Plain STEP I/O — only built without CADRUM_COLOR; with color, STEP goes
 // through XCAF (`read_step_color_stream` etc.) instead.
 #ifndef CADRUM_COLOR
-std::unique_ptr<TopoDS_Shape> read_step_stream(RustReader& reader);
+std::unique_ptr<TopoDS_Shape> read_step_stream(
+    RustReader& reader, bool preserve_body_types);
 bool write_step_stream(const TopoDS_Shape& shape, RustWriter& writer);
 #endif
 std::unique_ptr<TopoDS_Shape> read_step_faces_stream(RustReader& reader);
@@ -219,10 +220,6 @@ bool shape_is_shell(const TopoDS_Shape& shape);
 bool shape_is_valid(const TopoDS_Shape& shape);
 bool shell_is_closed(const TopoDS_Shape& shape);
 std::size_t shell_boundary_edge_count(const TopoDS_Shape& shape);
-std::unique_ptr<TopoDS_Shape> make_solid_from_shell(
-    const TopoDS_Shape& shell,
-    std::uint32_t& out_status,
-    std::size_t& out_detail);
 double shape_volume(const TopoDS_Shape& shape);
 double shape_surface_area(const TopoDS_Shape& shape);
 void shape_center_of_mass(const TopoDS_Shape& shape,
@@ -240,7 +237,6 @@ void shape_bounding_box(const TopoDS_Shape& shape,
 
 std::unique_ptr<std::vector<TopoDS_Shape>> decompose_into_solids(const TopoDS_Shape& shape);
 std::unique_ptr<std::vector<TopoDS_Shape>> decompose_into_shells(const TopoDS_Shape& shape);
-std::unique_ptr<std::vector<TopoDS_Shape>> decompose_into_brep_bodies(const TopoDS_Shape& shape);
 void compound_add(TopoDS_Shape& compound, const TopoDS_Shape& child);
 void compound_add_face(TopoDS_Shape& compound, const TopoDS_Face& child);
 
@@ -479,7 +475,8 @@ namespace cadrum {
 std::unique_ptr<TopoDS_Shape> read_step_color_stream(
     RustReader&          reader,
     rust::Vec<uint64_t>& out_ids,
-    rust::Vec<float>&    out_rgb);
+    rust::Vec<float>&    out_rgb,
+    bool                 preserve_body_types);
 
 // A solid id is written as one styled_item on that solid; a face style, being the
 // more specific one, overrides it.

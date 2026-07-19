@@ -1,5 +1,7 @@
 #include "cadrum/src/occt/ffi.rs.h"
+#include "body_topology.h"
 #include "bspline_internal.h"
+#include "solid_from_shells.h"
 
 // ==================== OCCT headers (impl only — not exposed via wrapper.h) ====================
 //
@@ -208,7 +210,8 @@ std::streambuf::pos_type RustWriteStreambuf::seekpos(pos_type, std::ios_base::op
 // With color, STEP routes through XCAF (`read_step_color_stream` /
 // `write_step_color_stream`) instead.
 
-std::unique_ptr<TopoDS_Shape> read_step_stream(RustReader& reader) {
+std::unique_ptr<TopoDS_Shape> read_step_stream(
+    RustReader& reader, bool preserve_body_types) {
     RustReadStreambuf sbuf(reader);
     std::istream is(&sbuf);
 
@@ -226,8 +229,12 @@ std::unique_ptr<TopoDS_Shape> read_step_stream(RustReader& reader) {
 
     step_reader->TransferRoots(Message_ProgressRange());
     // step_reader is intentionally leaked — see comment above.
+    const TopoDS_Shape shape = step_reader->OneShape();
+    if (preserve_body_types && step_body_types_are_complete(shape)) {
+        return std::make_unique<TopoDS_Shape>(shape);
+    }
     return std::make_unique<TopoDS_Shape>(
-        try_sew_orphan_faces(step_reader->OneShape(), nullptr));
+        try_sew_orphan_faces(shape, nullptr));
 }
 
 bool write_step_stream(const TopoDS_Shape& shape, RustWriter& writer) {
@@ -407,102 +414,6 @@ std::unique_ptr<TopoDS_Shape> deep_copy(const TopoDS_Shape& shape) {
     return std::make_unique<TopoDS_Shape>(copier.Shape());
 }
 
-namespace {
-constexpr std::uint32_t SOLIDIFY_SUCCESS = 0;
-constexpr std::uint32_t SOLIDIFY_INVALID_SHELL = 1;
-constexpr std::uint32_t SOLIDIFY_OPEN_SHELL = 2;
-constexpr std::uint32_t SOLIDIFY_NON_MANIFOLD_SHELL = 3;
-constexpr std::uint32_t SOLIDIFY_BUILD_FAILED = 4;
-constexpr std::uint32_t SOLIDIFY_ORIENTATION_FAILED = 5;
-constexpr std::uint32_t SOLIDIFY_INVALID_SOLID = 6;
-constexpr std::uint32_t SOLIDIFY_NON_POSITIVE_VOLUME = 7;
-constexpr std::uint32_t SOLIDIFY_KERNEL_FAILURE = 8;
-
-void shell_edge_counts(
-    const TopoDS_Shell& shell,
-    std::size_t& boundary_edges,
-    std::size_t& non_manifold_edges)
-{
-    NCollection_IndexedDataMap<
-        TopoDS_Shape,
-        NCollection_List<TopoDS_Shape>,
-        TopTools_ShapeMapHasher> edge_faces;
-    TopExp::MapShapesAndAncestors(shell, TopAbs_EDGE, TopAbs_FACE, edge_faces);
-    boundary_edges = 0;
-    non_manifold_edges = 0;
-    const bool shell_is_closed = BRep_Tool::IsClosed(shell);
-    for (int index = 1; index <= edge_faces.Extent(); ++index) {
-        const auto& faces = edge_faces(index);
-        const int incidence = faces.Extent();
-        if (!shell_is_closed && incidence == 1) {
-            const TopoDS_Edge edge = TopoDS::Edge(edge_faces.FindKey(index));
-            const TopoDS_Face face = TopoDS::Face(faces.First());
-            if (!BRepTools::IsReallyClosed(edge, face)) ++boundary_edges;
-        } else if (incidence > 2) {
-            ++non_manifold_edges;
-        }
-    }
-}
-
-std::unique_ptr<TopoDS_Shape> checked_solid_from_shell(
-    const TopoDS_Shape& shape,
-    std::uint32_t& out_status,
-    std::size_t& out_detail)
-{
-    out_status = SOLIDIFY_INVALID_SHELL;
-    out_detail = 0;
-    try {
-        if (shape.IsNull() || shape.ShapeType() != TopAbs_SHELL) return nullptr;
-        const TopoDS_Shell shell = TopoDS::Shell(shape);
-
-        std::size_t boundary_edges = 0;
-        std::size_t non_manifold_edges = 0;
-        shell_edge_counts(shell, boundary_edges, non_manifold_edges);
-        if (non_manifold_edges != 0) {
-            out_status = SOLIDIFY_NON_MANIFOLD_SHELL;
-            out_detail = non_manifold_edges;
-            return nullptr;
-        }
-        if (boundary_edges != 0 || !BRep_Tool::IsClosed(shell)) {
-            out_status = SOLIDIFY_OPEN_SHELL;
-            out_detail = boundary_edges;
-            return nullptr;
-        }
-        if (!BRepCheck_Analyzer(shell).IsValid()) return nullptr;
-
-        out_status = SOLIDIFY_BUILD_FAILED;
-        BRepBuilderAPI_MakeSolid maker(shell);
-        if (!maker.IsDone()) return nullptr;
-        TopoDS_Solid solid = maker.Solid();
-        out_status = SOLIDIFY_ORIENTATION_FAILED;
-        if (!BRepLib::OrientClosedSolid(solid)) return nullptr;
-        out_status = SOLIDIFY_INVALID_SOLID;
-        if (!BRepCheck_Analyzer(solid).IsValid()) return nullptr;
-
-        GProp_GProps properties;
-        BRepGProp::VolumeProperties(solid, properties);
-        const double volume = properties.Mass();
-        if (!std::isfinite(volume) || volume <= 0.0) {
-            out_status = SOLIDIFY_NON_POSITIVE_VOLUME;
-            return nullptr;
-        }
-        out_status = SOLIDIFY_SUCCESS;
-        return std::make_unique<TopoDS_Shape>(solid);
-    } catch (const Standard_Failure&) {
-        out_status = SOLIDIFY_KERNEL_FAILURE;
-        return nullptr;
-    }
-}
-} // namespace
-
-std::unique_ptr<TopoDS_Shape> make_solid_from_shell(
-    const TopoDS_Shape& shell,
-    std::uint32_t& out_status,
-    std::size_t& out_detail)
-{
-    return checked_solid_from_shell(shell, out_status, out_detail);
-}
-
 // ==================== STEP read post-processing ====================
 
 // Recover Solids from a STEP-read Compound that has disjoint shells / loose
@@ -564,7 +475,7 @@ static TopoDS_Shape try_sew_orphan_faces(
     bb.MakeCompound(new_compound);
     for (const auto& s : existing_solids) bb.Add(new_compound, s);
     for (TopExp_Explorer sx(sewn, TopAbs_SHELL); sx.More(); sx.Next()) {
-        std::uint32_t status = SOLIDIFY_INVALID_SHELL;
+        std::uint32_t status = 0;
         std::size_t detail = 0;
         auto solid = checked_solid_from_shell(sx.Current(), status, detail);
         if (solid) bb.Add(new_compound, *solid);
@@ -594,24 +505,6 @@ std::unique_ptr<std::vector<TopoDS_Shape>> decompose_into_solids(const TopoDS_Sh
     auto result = std::make_unique<std::vector<TopoDS_Shape>>();
     for (TopExp_Explorer ex(shape, TopAbs_SOLID); ex.More(); ex.Next()) {
         result->push_back(ex.Current());  // shallow handle copy
-    }
-    return result;
-}
-
-std::unique_ptr<std::vector<TopoDS_Shape>> decompose_into_brep_bodies(const TopoDS_Shape& shape) {
-    auto result = std::make_unique<std::vector<TopoDS_Shape>>();
-    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> solid_shells;
-    for (TopExp_Explorer solids(shape, TopAbs_SOLID); solids.More(); solids.Next()) {
-        const TopoDS_Shape& solid = solids.Current();
-        result->push_back(solid);
-        for (TopExp_Explorer shells(solid, TopAbs_SHELL); shells.More(); shells.Next()) {
-            solid_shells.Add(shells.Current());
-        }
-    }
-    for (TopExp_Explorer shells(shape, TopAbs_SHELL); shells.More(); shells.Next()) {
-        if (!solid_shells.Contains(shells.Current())) {
-            result->push_back(shells.Current());
-        }
     }
     return result;
 }
@@ -2330,7 +2223,8 @@ static void collect_colors(
 std::unique_ptr<TopoDS_Shape> read_step_color_stream(
     RustReader&          reader,
     rust::Vec<uint64_t>& out_ids,
-    rust::Vec<float>&    out_rgb)
+    rust::Vec<float>&    out_rgb,
+    bool                 preserve_body_types)
 {
     try {
         // Create XDE document directly — avoids XCAFApp_Application which
@@ -2369,9 +2263,12 @@ std::unique_ptr<TopoDS_Shape> read_step_color_stream(
         std::unordered_map<uint64_t, std::array<float, 3>> colorMap;
         collect_colors(doc, colorTool, colorMap);
 
-        // Recover Solids from disjoint shells / loose faces (#129); also remaps
-        // colorMap keys for faces whose TShape* changed during sewing.
-        TopoDS_Shape post = try_sew_orphan_faces(compound, &colorMap);
+        // Body-mode import preserves explicit Shell/Solid leaves. The legacy
+        // Solid-only route still recovers solids from loose faces (#129).
+        TopoDS_Shape post = preserve_body_types
+            && step_body_types_are_complete(compound)
+            ? TopoDS_Shape(compound)
+            : try_sew_orphan_faces(compound, &colorMap);
 
         // Walk the POST-processed shape so sewing's new TShape* are picked up, and
         // entries it no longer holds are dropped by not being reached.

@@ -1,4 +1,5 @@
 pub mod body;
+mod body_io;
 pub(crate) mod bspline;
 pub(crate) mod compound;
 pub mod edge;
@@ -9,4 +10,5 @@ mod sew_heal;
 pub mod shell;
 pub mod solid;
 pub mod stream;
+mod topology;
 mod trimmed_bspline;

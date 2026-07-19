@@ -1,9 +1,15 @@
 /// Why a shell could not be promoted to a solid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SolidificationFailure {
+	EmptyShellSet,
 	InvalidShell,
 	OpenShell { boundary_edge_count: usize },
 	NonManifoldShell { edge_count: usize },
+	InvalidConstituentShell { shell_index: usize },
+	OpenConstituentShell { shell_index: usize, boundary_edge_count: usize },
+	NonManifoldConstituentShell { shell_index: usize, edge_count: usize },
+	CavityNotContained { shell_index: usize },
+	ShellIntersection { first_shell_index: usize, second_shell_index: usize },
 	BuildFailed,
 	OrientationFailed,
 	InvalidSolid,
@@ -14,9 +20,15 @@ pub enum SolidificationFailure {
 impl std::fmt::Display for SolidificationFailure {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
+			Self::EmptyShellSet => write!(f, "at least one outer shell is required"),
 			Self::InvalidShell => write!(f, "shell topology is invalid"),
 			Self::OpenShell { boundary_edge_count } => write!(f, "shell is open ({boundary_edge_count} boundary edges)"),
-			Self::NonManifoldShell { edge_count } => write!(f, "shell is non-manifold ({edge_count} edges do not have exactly two incident faces)"),
+			Self::NonManifoldShell { edge_count } => write!(f, "shell is non-manifold ({edge_count} edges have more than two incident faces)"),
+			Self::InvalidConstituentShell { shell_index } => write!(f, "shell {shell_index} topology is invalid"),
+			Self::OpenConstituentShell { shell_index, boundary_edge_count } => write!(f, "shell {shell_index} is open ({boundary_edge_count} boundary edges)"),
+			Self::NonManifoldConstituentShell { shell_index, edge_count } => write!(f, "shell {shell_index} is non-manifold ({edge_count} edges have more than two incident faces)"),
+			Self::CavityNotContained { shell_index } => write!(f, "cavity shell {shell_index} is not strictly contained by the outer shell"),
+			Self::ShellIntersection { first_shell_index, second_shell_index } => write!(f, "shells {first_shell_index} and {second_shell_index} touch or intersect"),
 			Self::BuildFailed => write!(f, "OCCT could not build a solid from the shell"),
 			Self::OrientationFailed => write!(f, "closed solid orientation could not be resolved"),
 			Self::InvalidSolid => write!(f, "constructed solid topology is invalid"),
@@ -43,6 +55,9 @@ pub enum Error {
 
 	/// Triangulation/meshing failed.
 	TriangulationFailed,
+
+	/// Exact ordered topology could not be queried without returning partial data.
+	TopologyQueryFailed,
 
 	/// Boolean operation (fuse/cut/common) failed.
 	BooleanOperationFailed,
@@ -140,6 +155,7 @@ impl std::fmt::Display for Error {
 			Error::StepWriteFailed => write!(f, "STEP write failed"),
 			Error::BrepWriteFailed => write!(f, "BRep write failed"),
 			Error::TriangulationFailed => write!(f, "Triangulation failed"),
+			Error::TopologyQueryFailed => write!(f, "Exact topology query failed"),
 			Error::BooleanOperationFailed => write!(f, "Boolean operation failed"),
 			Error::OneFailed(n) => write!(f, "Expected exactly one resulting Solid, got {}", n),
 			Error::CleanFailed => write!(f, "Shape clean failed"),
