@@ -40,6 +40,10 @@ changes until `1.0`.
 
 #### Changes
 
+- **Explicit closed-shell solidification.** `Shell::try_to_solid` validates
+  manifold closure, orientation, complete BRep validity, and finite positive
+  volume before returning a `Solid`; STEP orphan-face recovery keeps rejected
+  open shells instead of silently constructing invalid solids.
 - **`Mesh.normals`.** One unit outward normal per vertex, evaluated on the B-rep
   surface rather than averaged from the triangles, and emitted as glTF `NORMAL`.
   Faces never share vertices, so each is its own smoothing group. (#243, #244)

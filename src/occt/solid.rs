@@ -2,6 +2,7 @@ use super::compound::CompoundShape;
 use super::edge::Edge;
 use super::face::Face;
 use super::ffi;
+use super::shell::Shell;
 use crate::common::boolean::Boolean;
 use crate::common::error::Error;
 use crate::traits::{ProfileOrient, SolidStruct, Transform};
@@ -405,29 +406,11 @@ impl SolidStruct for Solid {
 	where
 		Face: 'a,
 	{
-		let mut face_vec = ffi::face_vec_new();
-		let mut count = 0usize;
-		for f in faces {
-			ffi::face_vec_push(face_vec.pin_mut(), &f.inner);
-			count += 1;
-		}
-		if count == 0 {
-			return Err(Error::SewFailed("sew: no faces given (need a face set forming one closed shell)".into()));
-		}
-		let shape = ffi::make_sewn_solid(&face_vec, tolerance);
-		if shape.is_null() {
-			return Err(Error::SewFailed(format!(
-				"sew: {} faces do not form exactly one closed shell within tolerance {} \
-				 (gaps, overlaps, multiple shells, or stray faces)",
-				count, tolerance
-			)));
-		}
-		Ok(Solid::new(
-			shape,
-			#[cfg(feature = "color")]
-			std::collections::HashMap::new(),
-			Default::default(),
-		))
+		let shell = Shell::sew(faces, tolerance)?;
+		shell.try_to_solid().map_err(|error| match error {
+			Error::SolidificationFailed(reason) => Error::SewFailed(format!("faces did not form a valid closed shell: {reason}")),
+			other => other,
+		})
 	}
 
 	// ==================== Offset surface ====================
@@ -610,6 +593,10 @@ impl SolidStruct for Solid {
 
 	fn volume(&self) -> f64 {
 		ffi::shape_volume(&self.inner)
+	}
+
+	fn is_valid(&self) -> bool {
+		ffi::shape_is_valid(&self.inner)
 	}
 
 	fn area(&self) -> f64 {

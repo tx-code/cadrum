@@ -122,6 +122,7 @@ mod ffi_bridge {
 		fn shape_is_valid(shape: &TopoDS_Shape) -> bool;
 		fn shell_is_closed(shape: &TopoDS_Shape) -> bool;
 		fn shell_boundary_edge_count(shape: &TopoDS_Shape) -> usize;
+		fn make_solid_from_shell(shell: &TopoDS_Shape, out_status: &mut u32, out_detail: &mut usize) -> UniquePtr<TopoDS_Shape>;
 		fn shape_volume(shape: &TopoDS_Shape) -> f64;
 		fn shape_surface_area(shape: &TopoDS_Shape) -> f64;
 		fn shape_center_of_mass(shape: &TopoDS_Shape, x: &mut f64, y: &mut f64, z: &mut f64);
@@ -192,7 +193,6 @@ mod ffi_bridge {
 		fn make_extrude(profile_edges: &CxxVector<TopoDS_Edge>, dx: f64, dy: f64, dz: f64) -> UniquePtr<TopoDS_Shape>;
 		fn make_pipe_shell(all_edges: &CxxVector<TopoDS_Edge>, spine_edges: &CxxVector<TopoDS_Edge>, orient: u32, ux: f64, uy: f64, uz: f64, aux_spine_edges: &CxxVector<TopoDS_Edge>) -> UniquePtr<TopoDS_Shape>;
 		fn make_loft(all_edges: &CxxVector<TopoDS_Edge>, ruled: bool) -> UniquePtr<TopoDS_Shape>;
-		fn make_sewn_solid(faces: &CxxVector<TopoDS_Face>, tolerance: f64) -> UniquePtr<TopoDS_Shape>;
 		fn make_sewn_shell(faces: &CxxVector<TopoDS_Face>, tolerance: f64) -> UniquePtr<TopoDS_Shape>;
 		fn make_offset_shape(shape: &TopoDS_Shape, offset: f64, tolerance: f64) -> UniquePtr<TopoDS_Shape>;
 		fn make_bspline_solid(coords: &[f64], nu: u32, nv: u32, u_periodic: bool) -> UniquePtr<TopoDS_Shape>;

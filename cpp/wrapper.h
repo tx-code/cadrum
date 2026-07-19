@@ -219,6 +219,10 @@ bool shape_is_shell(const TopoDS_Shape& shape);
 bool shape_is_valid(const TopoDS_Shape& shape);
 bool shell_is_closed(const TopoDS_Shape& shape);
 std::size_t shell_boundary_edge_count(const TopoDS_Shape& shape);
+std::unique_ptr<TopoDS_Shape> make_solid_from_shell(
+    const TopoDS_Shape& shell,
+    std::uint32_t& out_status,
+    std::size_t& out_detail);
 double shape_volume(const TopoDS_Shape& shape);
 double shape_surface_area(const TopoDS_Shape& shape);
 void shape_center_of_mass(const TopoDS_Shape& shape,
@@ -410,15 +414,6 @@ std::unique_ptr<TopoDS_Shape> make_loft(
     const std::vector<TopoDS_Edge>& all_edges,
     bool ruled);
 
-// Sew (stitch) free faces into a single closed shell and upgrade it to a
-// solid via BRepBuilderAPI_MakeSolid. The sewn result must contain exactly
-// one closed shell — gaps wider than `tolerance` (open shell), leftover free
-// faces, or multiple disconnected shells all return nullptr. The solid is
-// oriented with BRepLib::OrientClosedSolid so the enclosed volume is
-// positive regardless of input face orientation.
-std::unique_ptr<TopoDS_Shape> make_sewn_solid(
-    const std::vector<TopoDS_Face>& faces,
-    double tolerance);
 std::unique_ptr<TopoDS_Shape> make_sewn_shell(
     const std::vector<TopoDS_Face>& faces,
     double tolerance);

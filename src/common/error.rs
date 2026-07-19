@@ -1,3 +1,31 @@
+/// Why a shell could not be promoted to a solid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SolidificationFailure {
+	InvalidShell,
+	OpenShell { boundary_edge_count: usize },
+	NonManifoldShell { edge_count: usize },
+	BuildFailed,
+	OrientationFailed,
+	InvalidSolid,
+	NonPositiveVolume,
+	KernelFailure,
+}
+
+impl std::fmt::Display for SolidificationFailure {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Self::InvalidShell => write!(f, "shell topology is invalid"),
+			Self::OpenShell { boundary_edge_count } => write!(f, "shell is open ({boundary_edge_count} boundary edges)"),
+			Self::NonManifoldShell { edge_count } => write!(f, "shell is non-manifold ({edge_count} edges do not have exactly two incident faces)"),
+			Self::BuildFailed => write!(f, "OCCT could not build a solid from the shell"),
+			Self::OrientationFailed => write!(f, "closed solid orientation could not be resolved"),
+			Self::InvalidSolid => write!(f, "constructed solid topology is invalid"),
+			Self::NonPositiveVolume => write!(f, "constructed solid does not have finite positive volume"),
+			Self::KernelFailure => write!(f, "OCCT failed while validating the solid"),
+		}
+	}
+}
+
 /// Errors that can occur during CAD operations.
 #[derive(Debug)]
 pub enum Error {
@@ -63,6 +91,9 @@ pub enum Error {
 	/// form the required single connected shell within the given tolerance.
 	SewFailed(String),
 
+	/// A shell failed explicit closed-body validation and was not promoted.
+	SolidificationFailed(SolidificationFailure),
+
 	/// Surface offset (`Solid::offset_surface` / `BRepOffsetAPI_MakeOffsetShape`)
 	/// failed: the offset surfaces self-intersect (thin walls/slots thinner
 	/// than 2x the offset magnitude) or OCCT rejected the join. The string
@@ -117,6 +148,7 @@ impl std::fmt::Display for Error {
 			Error::ChamferFailed => write!(f, "Chamfer failed"),
 			Error::LoftFailed(msg) => write!(f, "Loft failed: {}", msg),
 			Error::SewFailed(msg) => write!(f, "Sew failed: {}", msg),
+			Error::SolidificationFailed(reason) => write!(f, "Solidification failed: {reason}"),
 			Error::OffsetFailed(msg) => write!(f, "Offset failed: {}", msg),
 			Error::BsplineFailed(msg) => write!(f, "Bspline failed: {}", msg),
 			Error::InvalidEdge(msg) => write!(f, "Invalid edge: {}", msg),

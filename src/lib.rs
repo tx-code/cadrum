@@ -32,7 +32,7 @@ pub use common::color::Color;
 pub use common::{
 	boolean::Boolean,
 	bspline::{BSplineAxis, BSplineSurface},
-	error::Error,
+	error::{Error, SolidificationFailure},
 	mesh::{Mesh, Scene2D, SceneOption},
 };
 // Re-export glam types used in cadrum's public API. Users should reach glam
@@ -173,6 +173,9 @@ impl Solid {
 	}
 	pub fn volume(&self) -> f64 {
 		<Self as crate::traits::SolidStruct>::volume(self)
+	}
+	pub fn is_valid(&self) -> bool {
+		<Self as crate::traits::SolidStruct>::is_valid(self)
 	}
 	pub fn area(&self) -> f64 {
 		<Self as crate::traits::SolidStruct>::area(self)

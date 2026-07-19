@@ -406,6 +406,102 @@ std::unique_ptr<TopoDS_Shape> deep_copy(const TopoDS_Shape& shape) {
     return std::make_unique<TopoDS_Shape>(copier.Shape());
 }
 
+namespace {
+constexpr std::uint32_t SOLIDIFY_SUCCESS = 0;
+constexpr std::uint32_t SOLIDIFY_INVALID_SHELL = 1;
+constexpr std::uint32_t SOLIDIFY_OPEN_SHELL = 2;
+constexpr std::uint32_t SOLIDIFY_NON_MANIFOLD_SHELL = 3;
+constexpr std::uint32_t SOLIDIFY_BUILD_FAILED = 4;
+constexpr std::uint32_t SOLIDIFY_ORIENTATION_FAILED = 5;
+constexpr std::uint32_t SOLIDIFY_INVALID_SOLID = 6;
+constexpr std::uint32_t SOLIDIFY_NON_POSITIVE_VOLUME = 7;
+constexpr std::uint32_t SOLIDIFY_KERNEL_FAILURE = 8;
+
+void shell_edge_counts(
+    const TopoDS_Shell& shell,
+    std::size_t& boundary_edges,
+    std::size_t& non_manifold_edges)
+{
+    NCollection_IndexedDataMap<
+        TopoDS_Shape,
+        NCollection_List<TopoDS_Shape>,
+        TopTools_ShapeMapHasher> edge_faces;
+    TopExp::MapShapesAndAncestors(shell, TopAbs_EDGE, TopAbs_FACE, edge_faces);
+    boundary_edges = 0;
+    non_manifold_edges = 0;
+    const bool shell_is_closed = BRep_Tool::IsClosed(shell);
+    for (int index = 1; index <= edge_faces.Extent(); ++index) {
+        const auto& faces = edge_faces(index);
+        const int incidence = faces.Extent();
+        if (!shell_is_closed && incidence == 1) {
+            const TopoDS_Edge edge = TopoDS::Edge(edge_faces.FindKey(index));
+            const TopoDS_Face face = TopoDS::Face(faces.First());
+            if (!BRepTools::IsReallyClosed(edge, face)) ++boundary_edges;
+        } else if (incidence > 2) {
+            ++non_manifold_edges;
+        }
+    }
+}
+
+std::unique_ptr<TopoDS_Shape> checked_solid_from_shell(
+    const TopoDS_Shape& shape,
+    std::uint32_t& out_status,
+    std::size_t& out_detail)
+{
+    out_status = SOLIDIFY_INVALID_SHELL;
+    out_detail = 0;
+    try {
+        if (shape.IsNull() || shape.ShapeType() != TopAbs_SHELL) return nullptr;
+        const TopoDS_Shell shell = TopoDS::Shell(shape);
+
+        std::size_t boundary_edges = 0;
+        std::size_t non_manifold_edges = 0;
+        shell_edge_counts(shell, boundary_edges, non_manifold_edges);
+        if (non_manifold_edges != 0) {
+            out_status = SOLIDIFY_NON_MANIFOLD_SHELL;
+            out_detail = non_manifold_edges;
+            return nullptr;
+        }
+        if (boundary_edges != 0 || !BRep_Tool::IsClosed(shell)) {
+            out_status = SOLIDIFY_OPEN_SHELL;
+            out_detail = boundary_edges;
+            return nullptr;
+        }
+        if (!BRepCheck_Analyzer(shell).IsValid()) return nullptr;
+
+        out_status = SOLIDIFY_BUILD_FAILED;
+        BRepBuilderAPI_MakeSolid maker(shell);
+        if (!maker.IsDone()) return nullptr;
+        TopoDS_Solid solid = maker.Solid();
+        out_status = SOLIDIFY_ORIENTATION_FAILED;
+        if (!BRepLib::OrientClosedSolid(solid)) return nullptr;
+        out_status = SOLIDIFY_INVALID_SOLID;
+        if (!BRepCheck_Analyzer(solid).IsValid()) return nullptr;
+
+        GProp_GProps properties;
+        BRepGProp::VolumeProperties(solid, properties);
+        const double volume = properties.Mass();
+        if (!std::isfinite(volume) || volume <= 0.0) {
+            out_status = SOLIDIFY_NON_POSITIVE_VOLUME;
+            return nullptr;
+        }
+        out_status = SOLIDIFY_SUCCESS;
+        return std::make_unique<TopoDS_Shape>(solid);
+    } catch (const Standard_Failure&) {
+        out_status = SOLIDIFY_KERNEL_FAILURE;
+        return nullptr;
+    }
+}
+} // namespace
+
+std::unique_ptr<TopoDS_Shape> make_solid_from_shell(
+    const TopoDS_Shape& shell,
+    std::uint32_t& out_status,
+    std::size_t& out_detail)
+{
+    return checked_solid_from_shell(shell, out_status, out_detail);
+}
+
 // ==================== STEP read post-processing ====================
 
 // Recover Solids from a STEP-read Compound that has disjoint shells / loose
@@ -458,7 +554,7 @@ static TopoDS_Shape try_sew_orphan_faces(
     // 3. 正常 STEP は素通し (= zero-overhead)
     if (!has_orphans) return compound;
 
-    // 4. 縫合 → Shell ごとに MakeSolid → 新 compound 構築
+    // 4. Promote only validated closed shells; retain every rejected shell.
     sewer.Perform();
     TopoDS_Shape sewn = sewer.SewedShape();
 
@@ -467,8 +563,11 @@ static TopoDS_Shape try_sew_orphan_faces(
     bb.MakeCompound(new_compound);
     for (const auto& s : existing_solids) bb.Add(new_compound, s);
     for (TopExp_Explorer sx(sewn, TopAbs_SHELL); sx.More(); sx.Next()) {
-        BRepBuilderAPI_MakeSolid mk(TopoDS::Shell(sx.Current()));
-        if (mk.IsDone()) bb.Add(new_compound, mk.Solid());
+        std::uint32_t status = SOLIDIFY_INVALID_SHELL;
+        std::size_t detail = 0;
+        auto solid = checked_solid_from_shell(sx.Current(), status, detail);
+        if (solid) bb.Add(new_compound, *solid);
+        else bb.Add(new_compound, sx.Current());
     }
 
     // 5. colormap キー remap (color path のみ)
@@ -803,16 +902,10 @@ bool shell_is_closed(const TopoDS_Shape& shape) {
 
 std::size_t shell_boundary_edge_count(const TopoDS_Shape& shape) {
     if (!shape_is_shell(shape)) return 0;
-    NCollection_IndexedDataMap<
-        TopoDS_Shape,
-        NCollection_List<TopoDS_Shape>,
-        TopTools_ShapeMapHasher> edge_faces;
-    TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edge_faces);
-    std::size_t count = 0;
-    for (int index = 1; index <= edge_faces.Extent(); ++index) {
-        if (edge_faces(index).Extent() == 1) ++count;
-    }
-    return count;
+    std::size_t boundary_edges = 0;
+    std::size_t non_manifold_edges = 0;
+    shell_edge_counts(TopoDS::Shell(shape), boundary_edges, non_manifold_edges);
+    return boundary_edges;
 }
 
 double shape_volume(const TopoDS_Shape& shape) {
@@ -1993,48 +2086,6 @@ std::unique_ptr<TopoDS_Shape> make_loft(
         loft.Build();
         if (!loft.IsDone()) return nullptr;
         return std::make_unique<TopoDS_Shape>(loft.Shape());
-    } catch (const Standard_Failure&) {
-        return nullptr;
-    }
-}
-
-// Sew (stitch) free faces into a single closed shell and upgrade it to a
-// solid. BRepBuilderAPI_Sewing merges boundary edges that coincide within
-// `tolerance`; the sewn result must contain exactly one closed shell —
-// gaps (open shell), leftover free faces, or multiple disconnected shells
-// all return nullptr. The solid is oriented with BRepLib::OrientClosedSolid
-// so the enclosed volume is positive regardless of input face orientation.
-std::unique_ptr<TopoDS_Shape> make_sewn_solid(
-    const std::vector<TopoDS_Face>& faces,
-    double tolerance)
-{
-    try {
-        if (faces.empty()) return nullptr;
-        BRepBuilderAPI_Sewing sewing(tolerance);
-        for (const auto& f : faces) sewing.Add(f);
-        sewing.Perform();
-        const TopoDS_Shape& sewn = sewing.SewedShape();
-        if (sewn.IsNull()) return nullptr;
-
-        // A fully sewn input comes back as a single TopAbs_SHELL; partial
-        // sewing yields a compound mixing shells and free faces, in which
-        // case requiring exactly one shell rejects the stray-face cases.
-        std::vector<TopoDS_Shell> shells;
-        if (sewn.ShapeType() == TopAbs_SHELL) {
-            shells.push_back(TopoDS::Shell(sewn));
-        } else {
-            for (TopExp_Explorer ex(sewn, TopAbs_SHELL); ex.More(); ex.Next()) {
-                shells.push_back(TopoDS::Shell(ex.Current()));
-            }
-        }
-        if (shells.size() != 1) return nullptr;
-        if (!BRep_Tool::IsClosed(shells.front())) return nullptr;
-
-        BRepBuilderAPI_MakeSolid solid_maker(shells.front());
-        if (!solid_maker.IsDone()) return nullptr;
-        TopoDS_Solid solid = solid_maker.Solid();
-        BRepLib::OrientClosedSolid(solid);
-        return std::make_unique<TopoDS_Shape>(solid);
     } catch (const Standard_Failure&) {
         return nullptr;
     }

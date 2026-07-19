@@ -501,6 +501,8 @@ pub trait SolidStruct: Sized + Clone + Transform {
 	// --- Queries ---
 	/// Volume of the solid (uniform density).
 	fn volume(&self) -> f64;
+	/// Whether OCCT accepts this solid's complete geometry and topology.
+	fn is_valid(&self) -> bool;
 	/// Total surface area of the solid.
 	fn area(&self) -> f64;
 	/// Center of mass (uniform density).
@@ -630,9 +632,8 @@ pub trait SolidStruct: Sized + Clone + Transform {
 	/// via `iter_face()`, or read from a surface-only exchange file — whose
 	/// boundary edges coincide pairwise within `tolerance`. Wraps OCCT's
 	/// `BRepBuilderAPI_Sewing`; the sewn shell must be **exactly one closed
-	/// shell**, which is then upgraded to a `Solid` (orientation is fixed
-	/// automatically so the enclosed volume is positive regardless of the
-	/// input faces' orientations).
+	/// shell**, which then follows [`Shell::try_to_solid`](crate::Shell::try_to_solid)
+	/// for orientation, topology validity, and positive-volume validation.
 	///
 	/// Fails with [`Error::SewFailed`] when the faces leave gaps wider than
 	/// `tolerance`, overlap, form multiple disconnected shells, or include

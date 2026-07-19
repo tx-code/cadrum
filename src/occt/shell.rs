@@ -3,8 +3,9 @@ use std::sync::OnceLock;
 
 use super::edge::Edge;
 use super::face::Face;
+use super::solid::Solid;
 use super::{ffi, io};
-use crate::Error;
+use crate::{Error, SolidificationFailure};
 
 /// One connected OCCT shell, which may be open or closed.
 pub struct Shell {
@@ -35,13 +36,39 @@ impl Shell {
 			face_count += 1;
 		}
 		if face_count == 0 {
-			return Err(Error::SewFailed("face set is empty".to_string()));
+			return Err(Error::SewFailed("no faces given".to_string()));
 		}
 		let inner = ffi::make_sewn_shell(&face_vec, tolerance);
 		if inner.is_null() {
 			return Err(Error::SewFailed("faces did not form exactly one connected shell".to_string()));
 		}
 		Ok(Self::new(inner))
+	}
+
+	/// Promote this shell only after closed-body validation succeeds.
+	pub fn try_to_solid(&self) -> Result<Solid, Error> {
+		let mut status = 0u32;
+		let mut detail = 0usize;
+		let inner = ffi::make_solid_from_shell(&self.inner, &mut status, &mut detail);
+		if status == 0 && !inner.is_null() {
+			return Ok(Solid::new(
+				inner,
+				#[cfg(feature = "color")]
+				std::collections::HashMap::new(),
+				Default::default(),
+			));
+		}
+		let failure = match status {
+			1 => SolidificationFailure::InvalidShell,
+			2 => SolidificationFailure::OpenShell { boundary_edge_count: detail },
+			3 => SolidificationFailure::NonManifoldShell { edge_count: detail },
+			4 => SolidificationFailure::BuildFailed,
+			5 => SolidificationFailure::OrientationFailed,
+			6 => SolidificationFailure::InvalidSolid,
+			7 => SolidificationFailure::NonPositiveVolume,
+			_ => SolidificationFailure::KernelFailure,
+		};
+		Err(Error::SolidificationFailed(failure))
 	}
 
 	pub fn is_closed(&self) -> bool {
